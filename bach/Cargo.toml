@@ -10,7 +10,7 @@ edition = "2018"
 anymap = "0.12"
 arr_macro = "0.1"
 async-task = { version = "4", default-features = false }
-flume = "0.9"
+flume = "0.10"
 futures = { version = "0.3", default-features = false }
 idmap = "0.2"
 intrusive-collections = "0.9"
