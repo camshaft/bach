@@ -14,7 +14,7 @@ flume = "0.9"
 futures = { version = "0.3", default-features = false }
 idmap = "0.2"
 intrusive-collections = "0.9"
-petgraph = "0.5"
+petgraph = "0.6"
 
 [dev-dependencies]
 bolero = "0.6"
