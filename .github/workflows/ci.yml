@@ -80,7 +80,7 @@ jobs:
         run: cargo update
 
       - name: Cache cargo registry
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         continue-on-error: true
         with:
           path: ~/.cargo/registry/cache
@@ -88,7 +88,7 @@ jobs:
           restore-keys: ${{ runner.os }}-${{ steps.toolchain.outputs.rustc_hash }}-${{ github.job }}-cargo-registry-
 
       - name: Cache sccache output
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         continue-on-error: true
         with:
           path: ${{ github.workspace }}/.sccache
@@ -159,7 +159,7 @@ jobs:
         run: cargo update
 
       - name: Cache cargo registry
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         continue-on-error: true
         with:
           path: ~/.cargo/registry/cache
@@ -167,7 +167,7 @@ jobs:
           restore-keys: ${{ runner.os }}-${{ steps.toolchain.outputs.rustc_hash }}-${{ github.job }}-cargo-registry-
 
       - name: Cache sccache output
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         continue-on-error: true
         with:
           path: ${{ github.workspace }}/.sccache
@@ -213,7 +213,7 @@ jobs:
         run: cargo update
 
       - name: Cache cargo registry
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         continue-on-error: true
         with:
           path: ~/.cargo/registry/cache
@@ -221,7 +221,7 @@ jobs:
           restore-keys: ${{ runner.os }}-${{ steps.toolchain.outputs.rustc_hash }}-${{ github.job }}-${{ matrix.crate }}-cargo-registry-
 
       - name: Cache sccache output
-        uses: actions/cache@v2
+        uses: actions/cache@v3
         continue-on-error: true
         with:
           path: ${{ github.workspace }}/.sccache
