@@ -18,4 +18,4 @@ rand = { version = "0.8", default-features = false }
 rand_xoshiro = "0.6"
 
 [dev-dependencies]
-bolero = "0.7"
+bolero = "0.8"
