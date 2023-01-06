@@ -8,7 +8,7 @@ license = "MIT"
 edition = "2018"
 
 [dependencies]
-arr_macro = "0.1"
+arr_macro = "0.2"
 async-task = { version = "4", default-features = false }
 futures = { version = "0.3", default-features = false }
 intrusive-collections = "0.9"
