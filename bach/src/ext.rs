@@ -75,3 +75,20 @@ where
         crate::task::primary::create(self)
     }
 }
+
+pub trait SeedExt {
+    type Output;
+
+    fn with_seed<S: Into<crate::rand::Scope>>(self, seed: S) -> Self::Output;
+}
+
+impl<F> SeedExt for F
+where
+    F: core::future::Future,
+{
+    type Output = crate::rand::Task<F>;
+
+    fn with_seed<S: Into<crate::rand::Scope>>(self, seed: S) -> Self::Output {
+        crate::rand::Task::new(self, seed.into())
+    }
+}

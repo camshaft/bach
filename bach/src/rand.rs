@@ -78,6 +78,12 @@ impl Scope {
     }
 }
 
+impl From<u64> for Scope {
+    fn from(value: u64) -> Self {
+        Self::new(value)
+    }
+}
+
 impl RngCore for Scope {
     fn next_u32(&mut self) -> u32 {
         self.rng.lock().next_u32()
