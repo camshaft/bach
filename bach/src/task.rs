@@ -6,7 +6,16 @@ crate::scope::define!(scope, Handle);
 pub fn spawn<F: 'static + Future<Output = T> + Send, T: 'static + Send>(
     future: F,
 ) -> JoinHandle<T> {
-    scope::borrow_with(|h| h.spawn(future))
+    scope::borrow_with(|handle| {
+        // try to inherit the parent group
+        crate::group::scope::try_borrow_with(|group| {
+            if let Some(group) = group {
+                handle.spawn(crate::group::Grouped::new(future, *group))
+            } else {
+                handle.spawn(future)
+            }
+        })
+    })
 }
 
 pub mod primary {
@@ -17,7 +26,7 @@ pub mod primary {
     pub fn spawn<F: 'static + Future<Output = T> + Send, T: 'static + Send>(
         future: F,
     ) -> JoinHandle<T> {
-        scope::borrow_with(|h| h.spawn_primary(future))
+        super::spawn(create(future))
     }
 
     #[derive(Debug)]
@@ -47,11 +56,29 @@ pub mod primary {
         scope::borrow_with(|h| h.primary_guard())
     }
 
-    pub async fn create<F: Future<Output = T>, T>(future: F) -> T {
-        // hold a primary guard
+    pub fn create<F: Future>(future: F) -> Wrapped<F> {
         let guard = guard();
-        let value = future.await;
-        drop(guard);
-        value
+        Wrapped {
+            inner: future,
+            guard,
+        }
+    }
+
+    #[pin_project::pin_project]
+    pub struct Wrapped<F> {
+        #[pin]
+        inner: F,
+        guard: Guard,
+    }
+
+    impl<F: Future> Future for Wrapped<F> {
+        type Output = F::Output;
+
+        fn poll(
+            self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Self::Output> {
+            self.project().inner.poll(cx)
+        }
     }
 }

@@ -1,4 +1,7 @@
-use crate::queue::{create_queue, Receiver, Sender};
+use crate::{
+    environment::Environment,
+    queue::{create_queue, Receiver, Sender},
+};
 use alloc::sync::Arc;
 use async_task::{Runnable, Task};
 use core::{
@@ -72,14 +75,6 @@ impl<E: Environment> Executor<E> {
         Output: Send + 'static,
     {
         self.handle.spawn(future)
-    }
-
-    pub fn spawn_primary<F, Output>(&mut self, future: F) -> JoinHandle<Output>
-    where
-        F: Future<Output = Output> + Send + 'static,
-        Output: Send + 'static,
-    {
-        self.handle.spawn_primary(future)
     }
 
     pub fn handle(&self) -> &Handle {
@@ -202,20 +197,6 @@ impl Handle {
         JoinHandle(Some(task))
     }
 
-    pub fn spawn_primary<F, Output>(&self, future: F) -> JoinHandle<Output>
-    where
-        F: Future<Output = Output> + Send + 'static,
-        Output: Send + 'static,
-    {
-        let guard = self.primary_guard();
-        self.spawn(async move {
-            let value = future.await;
-            // decrement the primary count after the future is finished
-            drop(guard);
-            value
-        })
-    }
-
     pub fn enter<F: FnOnce() -> O, O>(&self, f: F) -> O {
         crate::task::scope::with(self.clone(), f)
     }
@@ -226,30 +207,6 @@ impl Handle {
 
     fn primary_count(&self) -> u64 {
         self.primary_count.load(Ordering::SeqCst)
-    }
-}
-
-pub trait Environment {
-    fn run<Tasks, F>(&mut self, tasks: Tasks) -> Poll<()>
-    where
-        Tasks: Iterator<Item = F> + Send,
-        F: 'static + FnOnce() -> Poll<()> + Send;
-
-    fn on_macrostep(&mut self, count: usize) {
-        let _ = count;
-    }
-
-    fn close<F>(&mut self, close: F)
-    where
-        F: 'static + FnOnce() + Send,
-    {
-        let _ = self.run(
-            Some(move || {
-                close();
-                Poll::Ready(())
-            })
-            .into_iter(),
-        );
     }
 }
 

@@ -6,7 +6,7 @@ pub mod scheduler;
 mod stack;
 mod wheel;
 
-pub fn delay(duration: Duration) -> scheduler::Timer {
+pub fn sleep(duration: Duration) -> scheduler::Timer {
     scheduler::scope::borrow_with(|handle| {
         let nanos = duration.as_nanos();
         let nanos_per_tick = resolution::tick_duration().as_nanos();
@@ -16,13 +16,32 @@ pub fn delay(duration: Duration) -> scheduler::Timer {
     })
 }
 
-pub fn now() -> Duration {
+pub use self::sleep as delay;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Hash)]
+pub struct Instant(Duration);
+
+impl Instant {
+    pub fn now() -> Self {
+        now()
+    }
+
+    pub fn elapsed(self) -> Duration {
+        Self::now().0 - self.0
+    }
+
+    pub fn elapsed_since_start(self) -> Duration {
+        self.0
+    }
+}
+
+fn now() -> Instant {
     scheduler::scope::borrow_with(|handle| {
         let nanos_per_tick = resolution::tick_duration().as_nanos() as u64;
 
         let ticks = handle.ticks();
         let nanos = nanos_per_tick * ticks;
-        Duration::from_nanos(nanos)
+        Instant(Duration::from_nanos(nanos))
     })
 }
 
