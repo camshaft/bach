@@ -7,7 +7,34 @@ use pin_project::pin_project;
 use std::{cell::RefCell, collections::HashMap};
 
 thread_local! {
-    static GROUPS: RefCell<HashMap<String, u64>> = RefCell::new(HashMap::new());
+    static GROUPS: RefCell<Groups> = RefCell::new(Groups::default());
+}
+
+#[derive(Default)]
+struct Groups {
+    name_to_id: HashMap<String, u64>,
+    id_to_name: HashMap<u64, String>,
+}
+
+impl Groups {
+    fn name_to_id(&mut self, name: &str) -> u64 {
+        if let Some(id) = self.name_to_id.get(name).copied() {
+            return id;
+        }
+
+        let id = self.name_to_id.len() as u64;
+
+        listener::try_borrow_with(|scope| {
+            if let Some(on_group) = scope {
+                on_group(id, name);
+            }
+        });
+
+        self.name_to_id.insert(name.to_owned(), id);
+        self.id_to_name.insert(id, name.to_owned());
+
+        id
+    }
 }
 
 crate::scope::define!(scope, Group);
@@ -26,22 +53,20 @@ impl Group {
     pub fn new(name: &str) -> Self {
         GROUPS.with(|groups| {
             let mut groups = groups.borrow_mut();
-
-            if let Some(id) = groups.get(name).copied() {
-                return Self { id };
-            }
-
-            let id = groups.len() as u64;
-
-            listener::try_borrow_with(|scope| {
-                if let Some(on_group) = scope {
-                    on_group(id, name);
-                }
-            });
-
-            groups.insert(name.to_owned(), id);
+            let id = groups.name_to_id(name);
 
             Self { id }
+        })
+    }
+
+    pub fn name(&self) -> String {
+        GROUPS.with(|groups| {
+            groups
+                .borrow()
+                .id_to_name
+                .get(&self.id)
+                .unwrap()
+                .to_string()
         })
     }
 }
