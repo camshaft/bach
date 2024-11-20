@@ -4,10 +4,10 @@ use core::{
     pin::Pin,
     task::{Context, Poll},
 };
-use parking_lot::Mutex;
-use pin_project::pin_project;
+use pin_project_lite::pin_project;
 use rand::{distributions, prelude::*};
 use rand_xoshiro::Xoshiro256PlusPlus;
+use std::sync::Mutex;
 
 crate::scope::define!(scope, Scope);
 
@@ -47,7 +47,7 @@ pub fn swap<T>(items: &mut [T]) {
 
 pub fn swap_count<T>(items: &mut [T], count: usize) {
     scope::borrow_mut_with(|r| {
-        let mut r = r.rng.lock();
+        let mut r = r.rng.lock().unwrap();
         for _ in 0..count {
             let a = r.gen_range(0..items.len());
             let b = r.gen_range(0..items.len());
@@ -86,27 +86,28 @@ impl From<u64> for Scope {
 
 impl RngCore for Scope {
     fn next_u32(&mut self) -> u32 {
-        self.rng.lock().next_u32()
+        self.rng.lock().unwrap().next_u32()
     }
 
     fn next_u64(&mut self) -> u64 {
-        self.rng.lock().next_u64()
+        self.rng.lock().unwrap().next_u64()
     }
 
     fn fill_bytes(&mut self, bytes: &mut [u8]) {
-        self.rng.lock().fill_bytes(bytes)
+        self.rng.lock().unwrap().fill_bytes(bytes)
     }
 
     fn try_fill_bytes(&mut self, bytes: &mut [u8]) -> Result<(), rand::Error> {
-        self.rng.lock().try_fill_bytes(bytes)
+        self.rng.lock().unwrap().try_fill_bytes(bytes)
     }
 }
 
-#[pin_project]
-pub struct Task<F> {
-    #[pin]
-    inner: F,
-    scope: Scope,
+pin_project! {
+    pub struct Task<F> {
+        #[pin]
+        inner: F,
+        scope: Scope,
+    }
 }
 
 impl<F> Task<F> {

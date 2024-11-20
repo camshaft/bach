@@ -17,11 +17,11 @@ pub trait Queue<Entry> {
 pub mod atomic {
     use super::*;
     use alloc::sync::Arc;
+    use atomic_waker::AtomicWaker;
     use core::{
         sync::atomic::{AtomicBool, AtomicU64, Ordering},
         task::Waker,
     };
-    use futures::task::AtomicWaker;
     use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListLink};
 
     intrusive_adapter!(pub Adapter = ArcEntry: Entry { link: LinkedListLink });

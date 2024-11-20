@@ -1,13 +1,14 @@
 extern crate alloc;
 
-mod queue;
-
 pub mod environment;
 pub mod executor;
 pub mod ext;
 pub mod group;
+#[cfg(any(test, feature = "net"))]
+pub mod net;
 pub mod rand;
 pub mod scope;
+pub mod sync;
 pub mod task;
 pub mod time;
 

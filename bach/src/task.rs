@@ -22,6 +22,7 @@ pub mod primary {
     use super::*;
     use alloc::sync::Arc;
     use core::sync::atomic::{AtomicU64, Ordering};
+    use pin_project_lite::pin_project;
 
     pub fn spawn<F: 'static + Future<Output = T> + Send, T: 'static + Send>(
         future: F,
@@ -64,11 +65,12 @@ pub mod primary {
         }
     }
 
-    #[pin_project::pin_project]
-    pub struct Wrapped<F> {
-        #[pin]
-        inner: F,
-        guard: Guard,
+    pin_project! {
+        pub struct Wrapped<F> {
+            #[pin]
+            inner: F,
+            guard: Guard,
+        }
     }
 
     impl<F: Future> Future for Wrapped<F> {
