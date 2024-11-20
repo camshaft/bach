@@ -3,7 +3,7 @@ use core::{
     pin::Pin,
     task::{Context, Poll},
 };
-use pin_project::pin_project;
+use pin_project_lite::pin_project;
 use std::{cell::RefCell, collections::HashMap};
 
 thread_local! {
@@ -87,12 +87,13 @@ where
     }
 }
 
-#[must_use = "futures do nothing unless polled"]
-#[pin_project]
-pub struct Grouped<Inner> {
-    #[pin]
-    inner: Inner,
-    group: Group,
+pin_project! {
+    #[must_use = "futures do nothing unless polled"]
+    pub struct Grouped<Inner> {
+        #[pin]
+        inner: Inner,
+        group: Group,
+    }
 }
 
 impl<Inner> Grouped<Inner> {

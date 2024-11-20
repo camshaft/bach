@@ -1,6 +1,6 @@
 use crate::{
     environment::Environment,
-    queue::{create_queue, Receiver, Sender},
+    sync::queue::{vec_deque::Queue, Queue as _},
 };
 use alloc::sync::Arc;
 use async_task::{Runnable, Task};
@@ -47,16 +47,16 @@ impl<T> Drop for JoinHandle<T> {
 
 pub struct Executor<E: Environment> {
     environment: E,
-    queue: Receiver<Runnable>,
+    queue: Queue<Runnable>,
     handle: Handle,
 }
 
 impl<E: Environment> Executor<E> {
     pub fn new<F: FnOnce(&Handle) -> E>(create_env: F) -> Self {
-        let (sender, queue) = create_queue();
+        let queue = Queue::default();
 
         let handle = Handle {
-            sender,
+            sender: queue.clone(),
             primary_count: Default::default(),
         };
 
@@ -159,10 +159,11 @@ impl<E: Environment> Executor<E> {
     }
 
     pub fn close(&mut self) {
-        let queue = self.queue.close();
-        self.environment.close(move || {
-            // drop the pending items in the queue first
-            drop(queue);
+        // drop the pending items in the queue first
+        let _ = self.queue.close();
+        let items = self.queue.drain();
+        self.environment.close(|| {
+            drop(items);
         });
     }
 }
@@ -175,7 +176,7 @@ impl<E: Environment> Drop for Executor<E> {
 
 #[derive(Clone)]
 pub struct Handle {
-    sender: Sender<Runnable>,
+    sender: Queue<Runnable>,
     primary_count: Arc<AtomicU64>,
 }
 
@@ -188,7 +189,7 @@ impl Handle {
         let sender = self.sender.clone();
 
         let (runnable, task) = async_task::spawn(future, move |runnable| {
-            sender.send(runnable);
+            let _ = sender.push(runnable);
         });
 
         // queue the initial poll
@@ -215,7 +216,7 @@ pub(crate) mod tests {
     use super::*;
 
     pub fn executor() -> Executor<Env> {
-        Executor::new(|_| Env::default())
+        Executor::new(|_| Env)
     }
 
     #[derive(Default)]
@@ -259,29 +260,29 @@ pub(crate) mod tests {
     fn basic_test() {
         let mut executor = executor();
 
-        let (sender, mut receiver) = create_queue();
+        let queue = Queue::default();
 
         crate::task::scope::with(executor.handle().clone(), || {
             use crate::task::spawn;
 
-            let s1 = sender.clone();
+            let s1 = queue.clone();
             spawn(async move {
                 Yield::default().await;
-                s1.send("hello");
+                let _ = s1.push("hello");
                 Yield::default().await;
             });
 
-            let s2 = sender.clone();
+            let s2 = queue.clone();
             let exclaimation = async move {
                 Yield::default().await;
-                s2.send("!!!!!");
+                let _ = s2.push("!!!!!");
                 Yield::default().await;
             };
 
-            let s3 = sender.clone();
+            let s3 = queue.clone();
             spawn(async move {
                 Yield::default().await;
-                s3.send("world");
+                let _ = s3.push("world");
                 Yield::default().await;
                 exclaimation.await;
                 Yield::default().await;
@@ -291,7 +292,7 @@ pub(crate) mod tests {
         executor.macrostep();
 
         let mut output = String::new();
-        for chunk in receiver.drain() {
+        for chunk in queue.drain() {
             output.push_str(chunk);
         }
 

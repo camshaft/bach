@@ -5,17 +5,27 @@ authors = ["Cameron Bytheway <bytheway.cameron@gmail.com>"]
 description = "Discrete-event simulation environment for async workflows"
 repository = "https://github.com/camshaft/bach"
 license = "MIT"
-edition = "2018"
+edition = "2021"
+
+[features]
+net = []
 
 [dependencies]
 arr_macro = "0.2"
 async-task = { version = "4", default-features = false }
-futures = { version = "0.3", default-features = false }
+atomic-waker = "1"
+event-listener-strategy = { version = "0.5.2", default-features = false }
+futures-core = { version = "0.3", default-features = false }
 intrusive-collections = "0.9"
-parking_lot = "0.12"
-pin-project = "1"
+pin-project-lite = "0.2"
 rand = { version = "0.8", default-features = false }
 rand_xoshiro = "0.6"
 
 [dev-dependencies]
 bolero = "0.11"
+
+[lints.rust.unexpected_cfgs]
+level = "warn"
+check-cfg = [
+    'cfg(always_disabled)', # used to always disable something
+]

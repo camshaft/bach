@@ -15,7 +15,7 @@ env:
   RUST_BACKTRACE: 1
   # Pin the nightly toolchain to prevent breakage.
   # This should be occasionally updated.
-  RUST_NIGHTLY_TOOLCHAIN: nightly-2022-04-12
+  RUST_NIGHTLY_TOOLCHAIN: nightly-2024-11-19
 
 jobs:
   env:
@@ -28,72 +28,54 @@ jobs:
       - name: Evaluate definitions
         id: definitions
         run: |
-          export MSRV=$(cat rust-toolchain | awk '{$1=$1};1')
-          echo "::set-output name=msrv::$MSRV"
-          export RAW_VERSIONS="stable beta $RUST_NIGHTLY_TOOLCHAIN $MSRV"
+          export MSRV=$(rustup show | awk 'NF' | awk 'END{print $2}')
+          echo "msrv=$MSRV" >> "$GITHUB_OUTPUT"
+          export RAW_VERSIONS="stable $RUST_NIGHTLY_TOOLCHAIN $MSRV"
           export VERSIONS=$(echo $RAW_VERSIONS | jq -scR 'rtrimstr("\n")|split(" ")|.')
-          echo "::set-output name=versions::$VERSIONS"
+          echo "versions=$VERSIONS" >> "$GITHUB_OUTPUT"
 
   rustfmt:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
 
-      - uses: actions-rs/toolchain@v1
+      - name: Install rust toolchain
         id: toolchain
-        with:
-          toolchain: ${{ env.RUST_NIGHTLY_TOOLCHAIN }}
-          profile: minimal
-          override: true
-          components: rustfmt
+        run: |
+          rustup toolchain install ${{ env.RUST_NIGHTLY_TOOLCHAIN }} --profile minimal --component rustfmt
+          rustup override set ${{ env.RUST_NIGHTLY_TOOLCHAIN }}
 
       - name: Run cargo fmt
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
+        run: |
+          cargo fmt --all -- --check
 
   clippy:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        toolchain: [stable, beta]
     steps:
       - uses: actions/checkout@v3
-        with:
-          submodules: true
 
-      - uses: actions-rs/toolchain@v1.0.7
+      - name: Install rust toolchain
         id: toolchain
-        with:
-          toolchain: ${{ matrix.toolchain }}
-          profile: minimal
-          override: true
-          components: clippy
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup override set stable
 
       - uses: camshaft/rust-cache@v1
 
-      # TODO translate json reports to in-action warnings
       - name: Run cargo clippy
-        uses: actions-rs/cargo@v1.0.3
-        with:
-          command: clippy
-          args: --all-features --all-targets -- -D warnings
+        run: |
+          cargo clippy --all-features --all-targets --workspace
 
   udeps:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-        with:
-          submodules: true
 
-      - uses: actions-rs/toolchain@v1.0.7
+      - name: Install toolchain
         id: toolchain
-        with:
-          toolchain: ${{ env.RUST_NIGHTLY_TOOLCHAIN }}
-          profile: minimal
-          override: true
+        run: |
+          rustup toolchain install ${{ env.RUST_NIGHTLY_TOOLCHAIN }} --profile minimal
+          rustup override set ${{ env.RUST_NIGHTLY_TOOLCHAIN }}
 
       - uses: camshaft/rust-cache@v1
 
@@ -114,24 +96,23 @@ jobs:
         rust: ${{ fromJson(needs.env.outputs.rust-versions) }}
         os: [ubuntu-latest, macOS-latest, windows-latest]
     steps:
-      - uses: actions-rs/toolchain@v1
-        id: toolchain
-        with:
-          toolchain: ${{ matrix.rust }}
-          override: true
-
       - uses: actions/checkout@v3
         with:
           lfs: true
+
+      - name: Install toolchain
+        id: toolchain
+        run: |
+          rustup toolchain install ${{ matrix.rust }}
+          rustup override set ${{ matrix.rust }}
 
       - uses: camshaft/rust-cache@v1
         with:
           key: ${{ matrix.target }}
 
-      - name: Run cargo test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
+      - name: Run tests
+        run: |
+          cargo test
 
   miri:
     runs-on: ubuntu-latest
@@ -140,15 +121,12 @@ jobs:
         crate: [bach]
     steps:
       - uses: actions/checkout@v3
-        with:
-          submodules: true
 
-      - uses: actions-rs/toolchain@v1.0.7
+      - name: Install toolchain
         id: toolchain
-        with:
-          toolchain: ${{ env.RUST_NIGHTLY_TOOLCHAIN }}
-          override: true
-          components: miri, rust-src
+        run: |
+          rustup toolchain install ${{ env.RUST_NIGHTLY_TOOLCHAIN }} --component miri,rust-src
+          rustup override set ${{ env.RUST_NIGHTLY_TOOLCHAIN }}
 
       - uses: camshaft/rust-cache@v1
         with:

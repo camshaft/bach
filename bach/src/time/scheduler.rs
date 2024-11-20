@@ -2,7 +2,7 @@ use super::{
     entry::atomic::{self, ArcEntry},
     wheel::Wheel,
 };
-use crate::queue::{create_queue, Receiver, Sender};
+use crate::sync::queue::{vec_deque::Queue, Queue as _};
 use alloc::sync::Arc;
 use core::{
     fmt,
@@ -17,7 +17,7 @@ crate::scope::define!(scope, Handle);
 pub struct Scheduler {
     wheel: Wheel<ArcEntry>,
     handle: Handle,
-    queue: Receiver<ArcEntry>,
+    queue: Queue<ArcEntry>,
 }
 
 impl fmt::Debug for Scheduler {
@@ -38,8 +38,8 @@ impl Default for Scheduler {
 impl Scheduler {
     /// Creates a new Scheduler
     pub fn new() -> Self {
-        let (sender, queue) = create_queue();
-        let handle = Handle::new(sender);
+        let queue = Queue::default();
+        let handle = Handle::new(queue.clone());
 
         Self {
             wheel: Default::default(),
@@ -99,7 +99,7 @@ impl Scheduler {
 pub struct Handle(Arc<InnerHandle>);
 
 impl Handle {
-    fn new(queue: Sender<ArcEntry>) -> Self {
+    fn new(queue: Queue<ArcEntry>) -> Self {
         let inner = InnerHandle {
             ticks: AtomicU64::new(0),
             queue,
@@ -134,12 +134,12 @@ impl Handle {
 #[derive(Debug)]
 struct InnerHandle {
     ticks: AtomicU64,
-    queue: Sender<ArcEntry>,
+    queue: Queue<ArcEntry>,
 }
 
 impl Handle {
     fn register(&self, entry: &ArcEntry) {
-        self.0.queue.send(entry.clone());
+        let _ = self.0.queue.push(entry.clone());
     }
 }
 
