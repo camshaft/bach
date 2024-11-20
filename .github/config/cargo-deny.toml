@@ -1,9 +1,5 @@
 [advisories]
-vulnerability = "deny"
-unmaintained = "deny"
-notice = "deny"
 yanked = "deny"
-ignore = []
 
 [bans]
 multiple-versions = "deny"
@@ -16,13 +12,9 @@ unknown-registry = "deny"
 unknown-git = "deny"
 
 [licenses]
-unlicensed = "deny"
-allow-osi-fsf-free = "neither"
-copyleft = "deny"
 confidence-threshold = 0.90
 allow = [
     "Apache-2.0",
     "MIT",
     "Unicode-DFS-2016",
-    "Zlib",
 ]
