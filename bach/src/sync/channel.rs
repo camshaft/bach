@@ -15,6 +15,7 @@ use event_listener_strategy::{
 };
 use futures_core::{ready, stream::Stream};
 use pin_project_lite::pin_project;
+use std::process::abort;
 
 struct Channel<T, Q: ?Sized = dyn Queue<T>> {
     /// Send operations waiting while the channel is full.
@@ -90,8 +91,8 @@ pub struct Sender<T> {
 }
 
 impl<T> Sender<T> {
-    /// Attempts to send a message into the channel.
-    pub fn try_send(&self, msg: T) -> Result<Option<T>, PushError<T>> {
+    /// Attempts to push a message into the channel.
+    pub fn try_push(&self, msg: T) -> Result<Option<T>, PushError<T>> {
         let prev = self.channel.queue.push(msg)?;
 
         // Notify a blocked receive operation. If the notified operation gets canceled,
@@ -104,9 +105,9 @@ impl<T> Sender<T> {
         Ok(prev)
     }
 
-    /// Sends a message into the channel.
-    pub fn send(&self, msg: T) -> Send<'_, T> {
-        Send::_new(SendInner {
+    /// Pushes a message into the channel.
+    pub fn push(&self, msg: T) -> Push<'_, T> {
+        Push::_new(PushInner {
             sender: self,
             msg: Some(msg),
             listener: None,
@@ -231,8 +232,8 @@ pin_project! {
 }
 
 impl<T> Receiver<T> {
-    /// Attempts to receive a message from the channel.
-    pub fn try_recv(&self) -> Result<T, PopError> {
+    /// Attempts to pop a message from the channel.
+    pub fn try_pop(&self) -> Result<T, PopError> {
         let msg = self.channel.queue.pop()?;
         // Notify a blocked send operation. If the notified operation gets canceled, it
         // will notify another blocked send operation.
@@ -240,9 +241,9 @@ impl<T> Receiver<T> {
         Ok(msg)
     }
 
-    /// Receives a message from the channel.
-    pub fn recv(&self) -> Recv<'_, T> {
-        Recv::_new(RecvInner {
+    /// Pops a message from the channel.
+    pub fn pop(&self) -> Pop<'_, T> {
+        Pop::_new(PopInner {
             receiver: self,
             listener: None,
             _pin: PhantomPinned,
@@ -341,7 +342,7 @@ impl<T> Stream for Receiver<T> {
 
             loop {
                 // Attempt to receive a message.
-                match self.try_recv() {
+                match self.try_pop() {
                     Ok(msg) => {
                         // The stream is not blocked on an event - drop the listener.
                         let this = self.as_mut().project();
@@ -471,10 +472,10 @@ impl<T> fmt::Debug for WeakReceiver<T> {
 }
 
 easy_wrapper! {
-    /// A future returned by [`Sender::send()`].
+    /// A future returned by [`Sender::push()`].
     #[derive(Debug)]
     #[must_use = "futures do nothing unless you `.await` or poll them"]
-    pub struct Send<'a, T>(SendInner<'a, T> => Result<(), PushError<T>>);
+    pub struct Push<'a, T>(PushInner<'a, T> => Result<(), PushError<T>>);
     #[cfg(always_disabled)]
     pub(self) wait();
 }
@@ -482,7 +483,7 @@ easy_wrapper! {
 pin_project! {
     #[derive(Debug)]
     #[project(!Unpin)]
-    struct SendInner<'a, T> {
+    struct PushInner<'a, T> {
         // Reference to the original sender.
         sender: &'a Sender<T>,
 
@@ -498,7 +499,7 @@ pin_project! {
     }
 }
 
-impl<'a, T> EventListenerFuture for SendInner<'a, T> {
+impl<'a, T> EventListenerFuture for PushInner<'a, T> {
     type Output = Result<(), PushError<T>>;
 
     /// Run this future with the given `Strategy`.
@@ -512,7 +513,7 @@ impl<'a, T> EventListenerFuture for SendInner<'a, T> {
         loop {
             let msg = this.msg.take().unwrap();
             // Attempt to send a message.
-            match this.sender.try_send(msg) {
+            match this.sender.try_push(msg) {
                 Ok(_) => return Poll::Ready(Ok(())),
                 Err(PushError::Full(m)) => *this.msg = Some(m),
                 Err(error) => return Poll::Ready(Err(error)),
@@ -530,10 +531,10 @@ impl<'a, T> EventListenerFuture for SendInner<'a, T> {
 }
 
 easy_wrapper! {
-    /// A future returned by [`Receiver::recv()`].
+    /// A future returned by [`Receiver::pop()`].
     #[derive(Debug)]
     #[must_use = "futures do nothing unless you `.await` or poll them"]
-    pub struct Recv<'a, T>(RecvInner<'a, T> => Result<T, PopError>);
+    pub struct Pop<'a, T>(PopInner<'a, T> => Result<T, PopError>);
     #[cfg(always_disabled)]
     pub(crate) wait();
 }
@@ -541,7 +542,7 @@ easy_wrapper! {
 pin_project! {
     #[derive(Debug)]
     #[project(!Unpin)]
-    struct RecvInner<'a, T> {
+    struct PopInner<'a, T> {
         // Reference to the receiver.
         receiver: &'a Receiver<T>,
 
@@ -554,7 +555,7 @@ pin_project! {
     }
 }
 
-impl<'a, T> EventListenerFuture for RecvInner<'a, T> {
+impl<'a, T> EventListenerFuture for PopInner<'a, T> {
     type Output = Result<T, PopError>;
 
     /// Run this future with the given `Strategy`.
@@ -567,7 +568,7 @@ impl<'a, T> EventListenerFuture for RecvInner<'a, T> {
 
         loop {
             // Attempt to receive a message.
-            match this.receiver.try_recv() {
+            match this.receiver.try_pop() {
                 Ok(msg) => return Poll::Ready(Ok(msg)),
                 Err(PopError::Empty) => {}
                 Err(error) => return Poll::Ready(Err(error)),
@@ -583,5 +584,3 @@ impl<'a, T> EventListenerFuture for RecvInner<'a, T> {
         }
     }
 }
-
-use std::process::abort;

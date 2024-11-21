@@ -1,5 +1,6 @@
 use core::fmt;
 
+pub mod priority;
 pub mod vec_deque;
 
 pub trait Queue<T> {

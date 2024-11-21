@@ -17,7 +17,7 @@ crate::scope::define!(scope, Handle);
 pub struct Scheduler {
     wheel: Wheel<ArcEntry>,
     handle: Handle,
-    queue: Queue<ArcEntry>,
+    queue: Arc<Queue<ArcEntry>>,
 }
 
 impl fmt::Debug for Scheduler {
@@ -38,7 +38,7 @@ impl Default for Scheduler {
 impl Scheduler {
     /// Creates a new Scheduler
     pub fn new() -> Self {
-        let queue = Queue::default();
+        let queue = Arc::new(Queue::default());
         let handle = Handle::new(queue.clone());
 
         Self {
@@ -99,7 +99,7 @@ impl Scheduler {
 pub struct Handle(Arc<InnerHandle>);
 
 impl Handle {
-    fn new(queue: Queue<ArcEntry>) -> Self {
+    fn new(queue: Arc<Queue<ArcEntry>>) -> Self {
         let inner = InnerHandle {
             ticks: AtomicU64::new(0),
             queue,
@@ -134,7 +134,7 @@ impl Handle {
 #[derive(Debug)]
 struct InnerHandle {
     ticks: AtomicU64,
-    queue: Queue<ArcEntry>,
+    queue: Arc<Queue<ArcEntry>>,
 }
 
 impl Handle {

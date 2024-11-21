@@ -1,30 +1,11 @@
 use super::{CloseError, PopError, PushError};
-use alloc::collections::VecDeque;
+use alloc::collections::BinaryHeap;
 use core::fmt;
 use std::sync::Mutex;
-
-#[cfg(test)]
-mod tests;
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Discipline {
-    #[default]
-    Fifo,
-    Lifo,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Overflow {
-    PreferRecent,
-    #[default]
-    PreferOldest,
-}
 
 #[derive(Default)]
 pub struct Builder {
     capacity: Option<usize>,
-    discipline: Discipline,
-    overflow: Overflow,
 }
 
 impl Builder {
@@ -33,26 +14,17 @@ impl Builder {
         self
     }
 
-    pub fn with_discipline(mut self, discipline: Discipline) -> Self {
-        self.discipline = discipline;
-        self
-    }
-
-    pub fn with_overflow(mut self, overflow: Overflow) -> Self {
-        self.overflow = overflow;
-        self
-    }
-
-    pub fn build<T>(self) -> Queue<T> {
+    pub fn build<T>(self) -> Queue<T>
+    where
+        T: core::cmp::Ord,
+    {
         let config = Config {
             capacity: self.capacity,
-            discipline: self.discipline,
-            overflow: self.overflow,
         };
         let queue = if let Some(cap) = self.capacity {
-            VecDeque::with_capacity(cap)
+            BinaryHeap::with_capacity(cap)
         } else {
-            VecDeque::new()
+            BinaryHeap::new()
         };
         let queue = Mutex::new((queue, true));
         Queue { config, queue }
@@ -61,38 +33,25 @@ impl Builder {
 
 struct Config {
     capacity: Option<usize>,
-    discipline: Discipline,
-    overflow: Overflow,
 }
 
 impl Config {
     #[inline]
-    fn push<T>(&self, queue: &mut VecDeque<T>, value: T) -> Result<Option<T>, PushError<T>> {
-        let mut prev = None;
-
+    fn push<T>(&self, queue: &mut BinaryHeap<T>, value: T) -> Result<Option<T>, PushError<T>>
+    where
+        T: core::cmp::Ord,
+    {
         if self.is_full(queue) {
-            match self.overflow {
-                Overflow::PreferOldest => return Err(PushError::Full(value)),
-                Overflow::PreferRecent => {
-                    // shift the queue items around to make room for our new value
-                    prev = match self.discipline {
-                        Discipline::Fifo => queue.pop_front(),
-                        Discipline::Lifo => queue.pop_back(),
-                    };
-                }
-            }
+            return Err(PushError::Full(value));
         }
 
-        match self.discipline {
-            Discipline::Fifo => queue.push_back(value),
-            Discipline::Lifo => queue.push_front(value),
-        }
+        queue.push(value);
 
-        Ok(prev)
+        Ok(None)
     }
 
     #[inline]
-    fn is_full<T>(&self, queue: &VecDeque<T>) -> bool {
+    fn is_full<T>(&self, queue: &BinaryHeap<T>) -> bool {
         if let Some(cap) = self.capacity {
             queue.len() >= cap
         } else {
@@ -103,10 +62,13 @@ impl Config {
 
 pub struct Queue<T> {
     config: Config,
-    queue: Mutex<(VecDeque<T>, bool)>,
+    queue: Mutex<(BinaryHeap<T>, bool)>,
 }
 
-impl<T> Default for Queue<T> {
+impl<T> Default for Queue<T>
+where
+    T: core::cmp::Ord,
+{
     fn default() -> Self {
         Builder::default().build()
     }
@@ -114,7 +76,7 @@ impl<T> Default for Queue<T> {
 
 impl<T> fmt::Debug for Queue<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("vec_deque::Queue").finish_non_exhaustive()
+        f.debug_struct("priority::Queue").finish_non_exhaustive()
     }
 }
 
@@ -124,18 +86,10 @@ impl Queue<()> {
     }
 }
 
-impl<T> Queue<T> {
-    pub fn drain(&self) -> VecDeque<T> {
-        if let Ok(mut inner) = self.queue.lock() {
-            let replacement = VecDeque::with_capacity(inner.0.capacity());
-            core::mem::replace(&mut inner.0, replacement)
-        } else {
-            VecDeque::new()
-        }
-    }
-}
-
-impl<T> super::Queue<T> for Queue<T> {
+impl<T> super::Queue<T> for Queue<T>
+where
+    T: core::cmp::Ord,
+{
     fn push(&self, value: T) -> Result<Option<T>, PushError<T>> {
         let Some(mut inner) = self.queue.lock().ok().filter(|v| v.1) else {
             return Err(PushError::Closed(value));
@@ -152,7 +106,7 @@ impl<T> super::Queue<T> for Queue<T> {
             .filter(|v| v.1)
             .ok_or(PopError::Closed)?;
 
-        inner.0.pop_front().ok_or(PopError::Empty)
+        inner.0.pop().ok_or(PopError::Empty)
     }
 
     fn close(&self) -> Result<(), super::CloseError> {

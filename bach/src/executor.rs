@@ -47,13 +47,13 @@ impl<T> Drop for JoinHandle<T> {
 
 pub struct Executor<E: Environment> {
     environment: E,
-    queue: Queue<Runnable>,
+    queue: Arc<Queue<Runnable>>,
     handle: Handle,
 }
 
 impl<E: Environment> Executor<E> {
     pub fn new<F: FnOnce(&Handle) -> E>(create_env: F) -> Self {
-        let queue = Queue::default();
+        let queue = Arc::new(Queue::default());
 
         let handle = Handle {
             sender: queue.clone(),
@@ -176,7 +176,7 @@ impl<E: Environment> Drop for Executor<E> {
 
 #[derive(Clone)]
 pub struct Handle {
-    sender: Queue<Runnable>,
+    sender: Arc<Queue<Runnable>>,
     primary_count: Arc<AtomicU64>,
 }
 
@@ -260,7 +260,7 @@ pub(crate) mod tests {
     fn basic_test() {
         let mut executor = executor();
 
-        let queue = Queue::default();
+        let queue = Arc::new(Queue::default());
 
         crate::task::scope::with(executor.handle().clone(), || {
             use crate::task::spawn;
