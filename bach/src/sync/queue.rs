@@ -1,6 +1,6 @@
 use crate::{sync::channel, time::Instant};
 use core::fmt;
-use std::task::Context;
+use std::{sync::Arc, task::Context};
 
 pub mod latent;
 pub mod priority;
@@ -21,6 +21,51 @@ pub trait Queue<T> {
     fn is_full(&self) -> bool;
     fn len(&self) -> usize;
     fn capacity(&self) -> Option<usize>;
+}
+
+impl<T, Q> Queue<T> for Arc<Q>
+where
+    Q: Queue<T>,
+{
+    fn push(&self, value: T) -> Result<Option<T>, PushError<T>> {
+        self.as_ref().push(value)
+    }
+
+    fn push_with_context(&self, value: T, cx: &mut Context) -> Result<Option<T>, PushError<T>> {
+        self.as_ref().push_with_context(value, cx)
+    }
+
+    fn pop(&self) -> Result<T, PopError> {
+        self.as_ref().pop()
+    }
+
+    fn pop_with_context(&self, cx: &mut Context) -> Result<T, PopError> {
+        self.as_ref().pop_with_context(cx)
+    }
+
+    fn close(&self) -> Result<(), CloseError> {
+        self.as_ref().close()
+    }
+
+    fn is_closed(&self) -> bool {
+        self.as_ref().is_closed()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.as_ref().is_empty()
+    }
+
+    fn is_full(&self) -> bool {
+        self.as_ref().is_full()
+    }
+
+    fn len(&self) -> usize {
+        self.as_ref().len()
+    }
+
+    fn capacity(&self) -> Option<usize> {
+        self.as_ref().capacity()
+    }
 }
 
 pub trait Conditional<T>: Queue<T> {
