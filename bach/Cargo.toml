@@ -1,6 +1,6 @@
 [package]
 name = "bach"
-version = "0.0.6"
+version = "0.0.7"
 authors = ["Cameron Bytheway <bytheway.cameron@gmail.com>"]
 description = "Discrete-event simulation environment for async workflows"
 repository = "https://github.com/camshaft/bach"
