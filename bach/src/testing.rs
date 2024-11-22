@@ -1,4 +1,10 @@
 pub fn init_tracing() {
+    #[cfg(feature = "tracing")]
+    init_tracing_impl();
+}
+
+#[cfg(feature = "tracing")]
+fn init_tracing_impl() {
     use std::sync::Once;
 
     static TRACING: Once = Once::new();

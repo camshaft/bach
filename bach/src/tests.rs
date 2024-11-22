@@ -74,7 +74,9 @@ fn latent_queue() {
     const COUNT: u64 = 10;
 
     let elapsed = run(|| {
-        let (sender, receiver) = Queue::default()
+        let (sender, receiver) = Queue::builder()
+            .with_capacity(Some(20))
+            .build()
             .latent(10.ms())
             .sojourn()
             .span("channel")

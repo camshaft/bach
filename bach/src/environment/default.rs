@@ -2,7 +2,7 @@ use crate::{environment::Environment as _, executor, rand, time::scheduler};
 use core::task::Poll;
 use std::time::Duration;
 
-use super::Macrostep;
+use super::{Macrostep, Runnable};
 
 pub struct Runtime {
     inner: executor::Executor<Environment>,
@@ -90,10 +90,10 @@ impl super::Environment for Environment {
         self.handle.enter(|| self.time.enter(|| self.rand.enter(f)))
     }
 
-    fn run<Tasks, F>(&mut self, tasks: Tasks) -> Poll<()>
+    fn run<Tasks, R>(&mut self, tasks: Tasks) -> Poll<()>
     where
-        Tasks: IntoIterator<Item = F>,
-        F: 'static + FnOnce() -> Poll<()> + Send,
+        Tasks: IntoIterator<Item = R>,
+        R: Runnable,
     {
         let mut is_ready = true;
 
@@ -107,7 +107,7 @@ impl super::Environment for Environment {
                     // TODO run network here
 
                     for task in tasks {
-                        is_ready &= task().is_ready();
+                        is_ready &= task.run().is_ready();
                     }
                 })
             })

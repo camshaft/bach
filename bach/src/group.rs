@@ -1,3 +1,4 @@
+use crate::tracing::info_span;
 use core::{
     fmt,
     future::Future,
@@ -110,7 +111,7 @@ where
         let this = self.project();
         let inner = this.inner;
         let group = this.group;
-        let span = tracing::info_span!("group", %group);
+        let span = info_span!("group", %group);
         scope::with(*group, || span.in_scope(|| Future::poll(inner, cx)))
     }
 }

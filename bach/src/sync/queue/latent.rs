@@ -2,9 +2,9 @@ use super::{CloseError, PopError, PushError};
 use crate::{
     ext::*,
     time::{Duration, Instant},
+    tracing::{debug_span, Instrument},
 };
 use std::{marker::PhantomData, task::Context};
-use tracing::{debug_span, Instrument};
 
 pub trait Latency<T> {
     fn for_value(&self, value: &T) -> Duration;
