@@ -2,7 +2,7 @@ use super::{
     entry::atomic::{self, ArcEntry},
     wheel::Wheel,
 };
-use crate::sync::queue::{vec_deque::Queue, Queue as _};
+use crate::sync::queue::{self, Queue as _};
 use alloc::sync::Arc;
 use core::{
     fmt,
@@ -14,10 +14,18 @@ use core::{
 
 crate::scope::define!(scope, Handle);
 
+type Queue = Arc<queue::span::Queue<queue::vec_deque::Queue<ArcEntry>>>;
+
+fn new_queue() -> Queue {
+    let queue = queue::vec_deque::Queue::default();
+    let queue = queue::span::Queue::new(queue, "bach::timer");
+    Arc::new(queue)
+}
+
 pub struct Scheduler {
     wheel: Wheel<ArcEntry>,
     handle: Handle,
-    queue: Arc<Queue<ArcEntry>>,
+    queue: Queue,
 }
 
 impl fmt::Debug for Scheduler {
@@ -38,7 +46,8 @@ impl Default for Scheduler {
 impl Scheduler {
     /// Creates a new Scheduler
     pub fn new() -> Self {
-        let queue = Arc::new(Queue::default());
+        let queue = new_queue();
+
         let handle = Handle::new(queue.clone());
 
         Self {
@@ -71,14 +80,16 @@ impl Scheduler {
 
     /// Wakes all of the expired tasks
     pub fn wake(&mut self) -> usize {
-        self.wheel.wake(atomic::wake)
+        scope::with(self.handle(), || self.wheel.wake(atomic::wake))
     }
 
     /// Move the queued entries into the wheel
     pub fn collect(&mut self) {
-        for entry in self.queue.drain() {
-            self.wheel.insert(entry);
-        }
+        scope::with(self.handle(), || {
+            for entry in self.queue.drain() {
+                self.wheel.insert(entry);
+            }
+        })
     }
 
     pub fn close(&mut self) {
@@ -99,7 +110,7 @@ impl Scheduler {
 pub struct Handle(Arc<InnerHandle>);
 
 impl Handle {
-    fn new(queue: Arc<Queue<ArcEntry>>) -> Self {
+    fn new(queue: Queue) -> Self {
         let inner = InnerHandle {
             ticks: AtomicU64::new(0),
             queue,
@@ -119,6 +130,13 @@ impl Handle {
         self.0.ticks.load(Ordering::SeqCst)
     }
 
+    /// Returns the current time for the scheduler
+    pub fn now(&self) -> super::Instant {
+        let ticks = self.ticks();
+        let duration = crate::time::resolution::ticks_to_duration(ticks);
+        super::Instant(duration)
+    }
+
     fn advance(&self, ticks: u64) {
         if cfg!(test) {
             self.0
@@ -134,7 +152,7 @@ impl Handle {
 #[derive(Debug)]
 struct InnerHandle {
     ticks: AtomicU64,
-    queue: Arc<Queue<ArcEntry>>,
+    queue: Queue,
 }
 
 impl Handle {
@@ -267,6 +285,8 @@ mod tests {
 
     #[test]
     fn timer_test() {
+        crate::testing::init_tracing();
+
         let min_time = Duration::from_nanos(1).as_nanos() as u64;
         let max_time = Duration::from_secs(3600).as_nanos() as u64;
 

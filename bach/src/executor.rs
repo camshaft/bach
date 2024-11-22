@@ -1,6 +1,6 @@
 use crate::{
-    environment::Environment,
-    sync::queue::{vec_deque::Queue, Queue as _},
+    environment::{Environment, Macrostep},
+    sync::queue::{self, Queue as _},
 };
 use alloc::sync::Arc;
 use async_task::{Runnable, Task};
@@ -45,19 +45,28 @@ impl<T> Drop for JoinHandle<T> {
     }
 }
 
+type Queue = Arc<queue::span::Queue<queue::vec_deque::Queue<Runnable>>>;
+
+fn new_queue() -> Queue {
+    let queue = queue::vec_deque::Queue::default();
+    let queue = queue::span::Queue::new(queue, "bach::executor");
+    Arc::new(queue)
+}
+
 pub struct Executor<E: Environment> {
     environment: E,
-    queue: Arc<Queue<Runnable>>,
+    queue: Queue,
     handle: Handle,
 }
 
 impl<E: Environment> Executor<E> {
     pub fn new<F: FnOnce(&Handle) -> E>(create_env: F) -> Self {
-        let queue = Arc::new(Queue::default());
+        let queue = new_queue();
 
         let handle = Handle {
             sender: queue.clone(),
             primary_count: Default::default(),
+            ids: Default::default(),
         };
 
         let environment = create_env(&handle);
@@ -69,7 +78,7 @@ impl<E: Environment> Executor<E> {
         }
     }
 
-    pub fn spawn<F, Output>(&mut self, future: F) -> JoinHandle<Output>
+    pub fn spawn<F, Output>(&self, future: F) -> JoinHandle<Output>
     where
         F: Future<Output = Output> + Send + 'static,
         Output: Send + 'static,
@@ -82,23 +91,25 @@ impl<E: Environment> Executor<E> {
     }
 
     pub fn microstep(&mut self) -> Poll<usize> {
-        let tasks = self.queue.drain();
-
-        let task_count = tasks.len();
+        let task_count = self.queue.len();
 
         if task_count == 0 {
             return Poll::Ready(0);
         }
 
-        let tasks = tasks.into_iter().map(|runnable| {
-            move || {
-                if runnable.run() {
-                    Poll::Pending
-                } else {
-                    Poll::Ready(())
+        // make the drain lazy so the environment can be entered
+        let tasks = Some(&self.queue)
+            .into_iter()
+            .flat_map(|v| v.drain())
+            .map(|runnable| {
+                move || {
+                    if runnable.run() {
+                        Poll::Pending
+                    } else {
+                        Poll::Ready(())
+                    }
                 }
-            }
-        });
+            });
 
         if self.environment.run(tasks).is_ready() {
             Poll::Ready(task_count)
@@ -107,11 +118,15 @@ impl<E: Environment> Executor<E> {
         }
     }
 
-    pub fn macrostep(&mut self) -> usize {
+    pub fn macrostep(&mut self) -> Macrostep {
         loop {
-            if let Poll::Ready(count) = self.microstep() {
-                self.environment.on_macrostep(count);
-                return count;
+            if let Poll::Ready(tasks) = self.microstep() {
+                let macrostep = Macrostep { tasks, ticks: 0 };
+                let macrostep = self.environment.on_macrostep(macrostep);
+
+                self.environment.enter(|| macrostep.metrics());
+
+                return macrostep;
             }
         }
     }
@@ -160,10 +175,10 @@ impl<E: Environment> Executor<E> {
 
     pub fn close(&mut self) {
         // drop the pending items in the queue first
-        let _ = self.queue.close();
-        let items = self.queue.drain();
-        self.environment.close(|| {
-            drop(items);
+        let queue = self.queue.clone();
+        self.environment.close(move || {
+            let _ = queue.close();
+            drop(queue.drain());
         });
     }
 }
@@ -176,8 +191,9 @@ impl<E: Environment> Drop for Executor<E> {
 
 #[derive(Clone)]
 pub struct Handle {
-    sender: Arc<Queue<Runnable>>,
+    sender: Queue,
     primary_count: Arc<AtomicU64>,
+    ids: Arc<AtomicU64>,
 }
 
 impl Handle {
@@ -186,9 +202,30 @@ impl Handle {
         F: Future<Output = Output> + Send + 'static,
         Output: Send + 'static,
     {
+        self.spawn_named(future, "")
+    }
+
+    pub fn spawn_named<F, N, Output>(&self, future: F, name: N) -> JoinHandle<Output>
+    where
+        F: Future<Output = Output> + Send + 'static,
+        Output: Send + 'static,
+        N: core::fmt::Display,
+    {
+        count!("spawn");
+
         let sender = self.sender.clone();
 
+        let id = self.ids.fetch_add(1, Ordering::Relaxed);
+        let name = Arc::from(name.to_string());
+
+        let future = crate::task::info::WithInfo::new(future, id, &name);
+
         let (runnable, task) = async_task::spawn(future, move |runnable| {
+            if name.is_empty() {
+                count!("wake", "target" = id.to_string());
+            } else {
+                count!("wake", "target" = name.clone());
+            }
             let _ = sender.push(runnable);
         });
 
@@ -223,9 +260,13 @@ pub(crate) mod tests {
     pub struct Env;
 
     impl super::Environment for Env {
+        fn enter<F: FnOnce() -> O, O>(&self, f: F) -> O {
+            f()
+        }
+
         fn run<Tasks, F>(&mut self, tasks: Tasks) -> Poll<()>
         where
-            Tasks: Iterator<Item = F>,
+            Tasks: IntoIterator<Item = F>,
             F: 'static + FnOnce() -> Poll<()> + Send,
         {
             let mut is_ready = true;
@@ -258,9 +299,11 @@ pub(crate) mod tests {
 
     #[test]
     fn basic_test() {
+        crate::testing::init_tracing();
+
         let mut executor = executor();
 
-        let queue = Arc::new(Queue::default());
+        let queue = Arc::new(queue::vec_deque::Queue::default());
 
         crate::task::scope::with(executor.handle().clone(), || {
             use crate::task::spawn;

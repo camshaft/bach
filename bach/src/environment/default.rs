@@ -1,5 +1,7 @@
-use crate::{executor, rand, time::scheduler};
+use crate::{environment::Environment as _, executor, rand, time::scheduler};
 use core::task::Poll;
+
+use super::Macrostep;
 
 pub struct Runtime {
     inner: executor::Executor<Environment>,
@@ -60,10 +62,6 @@ pub struct Environment {
 }
 
 impl Environment {
-    fn enter<F: FnOnce() -> O, O>(&self, f: F) -> O {
-        self.handle.enter(|| self.time.enter(|| self.rand.enter(f)))
-    }
-
     fn close<F: FnOnce()>(&mut self, f: F) {
         let handle = &mut self.handle;
         let rand = &mut self.rand;
@@ -80,9 +78,13 @@ impl Environment {
 }
 
 impl super::Environment for Environment {
+    fn enter<F: FnOnce() -> O, O>(&self, f: F) -> O {
+        self.handle.enter(|| self.time.enter(|| self.rand.enter(f)))
+    }
+
     fn run<Tasks, F>(&mut self, tasks: Tasks) -> Poll<()>
     where
-        Tasks: Iterator<Item = F> + Send,
+        Tasks: IntoIterator<Item = F>,
         F: 'static + FnOnce() -> Poll<()> + Send,
     {
         let mut is_ready = true;
@@ -110,11 +112,11 @@ impl super::Environment for Environment {
         }
     }
 
-    fn on_macrostep(&mut self, count: usize) {
+    fn on_macrostep(&mut self, mut macrostep: Macrostep) -> Macrostep {
         // only advance time after a stall
-        if count > 0 {
+        if macrostep.tasks > 0 {
             self.stalled_iterations = 0;
-            return;
+            return macrostep;
         }
 
         self.stalled_iterations += 1;
@@ -129,14 +131,21 @@ impl super::Environment for Environment {
             panic!("the runtime stalled after 100 iterations");
         }
 
-        while let Some(time) = self.time.advance() {
-            let _ = time;
-            if self.time.wake() > 0 {
-                // if a task has woken, then reset the stall count
-                self.stalled_iterations = 0;
-                break;
+        while let Some(ticks) = self.time.advance() {
+            macrostep.ticks += ticks;
+
+            macrostep.tasks += self.time.wake();
+
+            if macrostep.tasks == 0 {
+                continue;
             }
+
+            // if a task has woken, then reset the stall count
+            self.stalled_iterations = 0;
+            break;
         }
+
+        macrostep
     }
 
     fn close<F>(&mut self, close: F)

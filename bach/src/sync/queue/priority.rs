@@ -42,10 +42,14 @@ impl Config {
         T: core::cmp::Ord,
     {
         if self.is_full(queue) {
+            count!("full");
+
             return Err(PushError::Full(value));
         }
 
+        count!("push");
         queue.push(value);
+        self.record_len(queue);
 
         Ok(None)
     }
@@ -57,6 +61,11 @@ impl Config {
         } else {
             false
         }
+    }
+
+    #[inline]
+    fn record_len<T>(&self, queue: &BinaryHeap<T>) {
+        measure!("len", queue.len() as u32);
     }
 }
 
@@ -103,16 +112,22 @@ where
             .queue
             .lock()
             .ok()
-            .filter(|v| v.1)
+            .filter(|v| !v.0.is_empty() || v.1)
             .ok_or(PopError::Closed)?;
 
-        inner.0.pop().ok_or(PopError::Empty)
+        let value = inner.0.pop().ok_or(PopError::Empty)?;
+
+        count!("pop");
+        self.config.record_len(&inner.0);
+
+        Ok(value)
     }
 
     fn close(&self) -> Result<(), super::CloseError> {
         let mut inner = self.queue.lock().map_err(|_| CloseError::AlreadyClosed)?;
         let prev = core::mem::replace(&mut inner.1, false);
         if prev {
+            count!("close");
             Ok(())
         } else {
             Err(CloseError::AlreadyClosed)

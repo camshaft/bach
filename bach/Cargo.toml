@@ -8,6 +8,7 @@ license = "MIT"
 edition = "2021"
 
 [features]
+coop = []
 net = []
 
 [dependencies]
@@ -18,11 +19,14 @@ event-listener-strategy = { version = "0.5.2", default-features = false }
 futures-core = { version = "0.3", default-features = false }
 intrusive-collections = "0.9"
 pin-project-lite = "0.2"
+metrics = "0.24"
 rand = { version = "0.8", default-features = false }
 rand_xoshiro = "0.6"
+tracing = "0.1"
 
 [dev-dependencies]
 bolero = "0.11"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [lints.rust.unexpected_cfgs]
 level = "warn"

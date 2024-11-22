@@ -1,4 +1,7 @@
-use super::queue::{CloseError, PopError, PushError, Queue};
+use crate::{
+    coop::Operation,
+    sync::queue::{CloseError, PopError, PushError, Queue},
+};
 use alloc::sync::Arc;
 use core::{
     fmt,
@@ -17,7 +20,7 @@ use futures_core::{ready, stream::Stream};
 use pin_project_lite::pin_project;
 use std::process::abort;
 
-struct Channel<T, Q: ?Sized = dyn Queue<T>> {
+struct Channel<T, Q: ?Sized = dyn 'static + Send + Sync + Queue<T>> {
     /// Send operations waiting while the channel is full.
     send_ops: Event,
 
@@ -34,6 +37,9 @@ struct Channel<T, Q: ?Sized = dyn Queue<T>> {
     receiver_count: AtomicUsize,
 
     value: PhantomData<T>,
+
+    send_resource: Operation,
+    recv_resource: Operation,
 
     queue: Q,
 }
@@ -56,7 +62,7 @@ impl<T> Channel<T> {
 /// Creates a channel.
 pub fn new<Q, T>(queue: Q) -> (Sender<T>, Receiver<T>)
 where
-    Q: 'static + Queue<T>,
+    Q: 'static + Send + Sync + Queue<T>,
 {
     let channel = Arc::new(Channel {
         send_ops: Event::new(),
@@ -64,8 +70,10 @@ where
         stream_ops: Event::new(),
         sender_count: AtomicUsize::new(1),
         receiver_count: AtomicUsize::new(1),
-        queue,
         value: PhantomData,
+        send_resource: Operation::register(),
+        recv_resource: Operation::register(),
+        queue,
     });
 
     let s = Sender {
@@ -106,13 +114,20 @@ impl<T> Sender<T> {
     }
 
     /// Pushes a message into the channel.
-    pub fn push(&self, msg: T) -> Push<'_, T> {
+    pub async fn push(&self, msg: T) -> Result<(), PushError<T>> {
+        self.channel.send_resource.acquire().await;
+
         Push::_new(PushInner {
             sender: self,
             msg: Some(msg),
             listener: None,
             _pin: PhantomPinned,
         })
+        .await
+    }
+
+    pub async fn send(&self, msg: T) -> Result<(), PushError<T>> {
+        self.push(msg).await
     }
 
     /// Closes the channel.
@@ -242,12 +257,19 @@ impl<T> Receiver<T> {
     }
 
     /// Pops a message from the channel.
-    pub fn pop(&self) -> Pop<'_, T> {
+    pub async fn pop(&self) -> Result<T, PopError> {
+        self.channel.recv_resource.acquire().await;
+
         Pop::_new(PopInner {
             receiver: self,
             listener: None,
             _pin: PhantomPinned,
         })
+        .await
+    }
+
+    pub async fn recv(&self) -> Result<T, PopError> {
+        self.pop().await
     }
 
     /// Closes the channel.

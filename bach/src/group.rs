@@ -1,4 +1,5 @@
 use core::{
+    fmt,
     future::Future,
     pin::Pin,
     task::{Context, Poll},
@@ -49,6 +50,12 @@ pub struct Group {
     id: u64,
 }
 
+impl fmt::Display for Group {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        GROUPS.with(|groups| groups.borrow().id_to_name.get(&self.id).unwrap().fmt(f))
+    }
+}
+
 impl Group {
     pub fn new(name: &str) -> Self {
         GROUPS.with(|groups| {
@@ -60,14 +67,7 @@ impl Group {
     }
 
     pub fn name(&self) -> String {
-        GROUPS.with(|groups| {
-            groups
-                .borrow()
-                .id_to_name
-                .get(&self.id)
-                .unwrap()
-                .to_string()
-        })
+        self.to_string()
     }
 }
 
@@ -80,10 +80,8 @@ where
     T: Future,
 {
     fn group(self, name: &str) -> Grouped<Self> {
-        Grouped {
-            inner: self,
-            group: Group::new(name),
-        }
+        let group = Group::new(name);
+        Grouped::new(self, group)
     }
 }
 
@@ -112,6 +110,7 @@ where
         let this = self.project();
         let inner = this.inner;
         let group = this.group;
-        scope::with(*group, || Future::poll(inner, cx))
+        let span = tracing::info_span!("group", %group);
+        scope::with(*group, || span.in_scope(|| Future::poll(inner, cx)))
     }
 }
