@@ -18,7 +18,10 @@ use event_listener_strategy::{
 };
 use futures_core::{ready, stream::Stream};
 use pin_project_lite::pin_project;
-use std::process::abort;
+use std::{
+    process::abort,
+    task::{RawWaker, RawWakerVTable, Waker},
+};
 
 struct Channel<T, Q: ?Sized = dyn 'static + Send + Sync + Queue<T>> {
     /// Send operations waiting while the channel is full.
@@ -59,8 +62,25 @@ impl<T> Channel<T> {
     }
 }
 
+impl<T, Q> Channel<T, Q> {
+    fn notify_after_send(&self) {
+        // Notify a blocked receive operation. If the notified operation gets canceled,
+        // it will notify another blocked receive operation.
+        self.recv_ops.notify_additional(1);
+
+        // Notify all blocked streams.
+        self.stream_ops.notify(usize::MAX);
+    }
+
+    fn notify_after_recv(&self) {
+        // Notify a blocked send operation. If the notified operation gets canceled, it
+        // will notify another blocked send operation.
+        self.send_ops.notify_additional(1);
+    }
+}
+
 /// Creates a channel.
-pub fn new<Q, T>(queue: Q) -> (Sender<T>, Receiver<T>)
+pub fn new<T, Q>(queue: Q) -> (Sender<T>, Receiver<T>)
 where
     Q: 'static + Send + Sync + Queue<T>,
 {
@@ -76,15 +96,78 @@ where
         queue,
     });
 
-    let s = Sender {
+    let sender_waker = waker::<_, _, true>(&channel);
+    let receiver_waker = waker::<_, _, false>(&channel);
+
+    let channel: Arc<Channel<T>> = channel;
+
+    let sender = Sender {
         channel: channel.clone(),
+        waker: sender_waker,
     };
-    let r = Receiver {
+
+    let receiver = Receiver {
+        channel: channel.clone(),
+        waker: receiver_waker,
         listener: None,
-        channel,
         _pin: PhantomPinned,
     };
-    (s, r)
+
+    (sender, receiver)
+}
+
+fn waker<Q, T, const IS_SEND: bool>(channel: &Arc<Channel<T, Q>>) -> Waker {
+    use core::mem::ManuallyDrop;
+
+    #[inline(always)]
+    unsafe fn clone_waker<T, Q, const IS_SEND: bool>(waker: *const ()) -> RawWaker {
+        unsafe { Arc::increment_strong_count(waker as *const Channel<T, Q>) };
+        RawWaker::new(
+            waker,
+            &RawWakerVTable::new(
+                clone_waker::<T, Q, IS_SEND>,
+                wake::<T, Q, IS_SEND>,
+                wake_by_ref::<T, Q, IS_SEND>,
+                drop_waker::<T, Q, IS_SEND>,
+            ),
+        )
+    }
+
+    unsafe fn wake<T, Q, const IS_SEND: bool>(waker: *const ()) {
+        let channel = unsafe { Arc::from_raw(waker as *const Channel<T, Q>) };
+        if IS_SEND {
+            channel.notify_after_send();
+        } else {
+            channel.notify_after_recv();
+        }
+    }
+
+    unsafe fn wake_by_ref<T, Q, const IS_SEND: bool>(waker: *const ()) {
+        let channel = unsafe { ManuallyDrop::new(Arc::from_raw(waker as *const Channel<T, Q>)) };
+        if IS_SEND {
+            channel.notify_after_send();
+        } else {
+            channel.notify_after_recv();
+        }
+    }
+
+    unsafe fn drop_waker<T, Q, const IS_SEND: bool>(waker: *const ()) {
+        unsafe { Arc::decrement_strong_count(waker as *const Channel<T, Q>) };
+    }
+
+    unsafe {
+        let ptr = Arc::into_raw(channel.clone()) as *const _;
+        let raw = RawWaker::new(
+            ptr,
+            &RawWakerVTable::new(
+                clone_waker::<T, Q, IS_SEND>,
+                wake::<T, Q, IS_SEND>,
+                wake_by_ref::<T, Q, IS_SEND>,
+                drop_waker::<T, Q, IS_SEND>,
+            ),
+        );
+        Waker::from_raw(raw)
+    }
 }
 
 /// The sending side of a channel.
@@ -96,21 +179,14 @@ where
 pub struct Sender<T> {
     /// Inner channel state.
     channel: Arc<Channel<T>>,
+    waker: Waker,
 }
 
 impl<T> Sender<T> {
     /// Attempts to push a message into the channel.
     pub fn try_push(&self, msg: T) -> Result<Option<T>, PushError<T>> {
-        let prev = self.channel.queue.push(msg)?;
-
-        // Notify a blocked receive operation. If the notified operation gets canceled,
-        // it will notify another blocked receive operation.
-        self.channel.recv_ops.notify_additional(1);
-
-        // Notify all blocked streams.
-        self.channel.stream_ops.notify(usize::MAX);
-
-        Ok(prev)
+        let mut ctx = core::task::Context::from_waker(&self.waker);
+        self.channel.queue.push_with_context(msg, &mut ctx)
     }
 
     /// Pushes a message into the channel.
@@ -174,6 +250,7 @@ impl<T> Sender<T> {
     pub fn downgrade(&self) -> WeakSender<T> {
         WeakSender {
             channel: self.channel.clone(),
+            waker: self.waker.clone(),
         }
     }
 
@@ -209,6 +286,7 @@ impl<T> Clone for Sender<T> {
 
         Sender {
             channel: self.channel.clone(),
+            waker: self.waker.clone(),
         }
     }
 }
@@ -225,6 +303,7 @@ pin_project! {
     pub struct Receiver<T> {
         // Inner channel state.
         channel: Arc<Channel<T>>,
+        waker: Waker,
 
         // Listens for a send or close event to unblock this stream.
         listener: Option<EventListener>,
@@ -249,11 +328,8 @@ pin_project! {
 impl<T> Receiver<T> {
     /// Attempts to pop a message from the channel.
     pub fn try_pop(&self) -> Result<T, PopError> {
-        let msg = self.channel.queue.pop()?;
-        // Notify a blocked send operation. If the notified operation gets canceled, it
-        // will notify another blocked send operation.
-        self.channel.send_ops.notify_additional(1);
-        Ok(msg)
+        let mut ctx = core::task::Context::from_waker(&self.waker);
+        self.channel.queue.pop_with_context(&mut ctx)
     }
 
     /// Pops a message from the channel.
@@ -316,6 +392,7 @@ impl<T> Receiver<T> {
     pub fn downgrade(&self) -> WeakReceiver<T> {
         WeakReceiver {
             channel: self.channel.clone(),
+            waker: self.waker.clone(),
         }
     }
 
@@ -342,6 +419,7 @@ impl<T> Clone for Receiver<T> {
 
         Receiver {
             channel: self.channel.clone(),
+            waker: self.waker.clone(),
             listener: None,
             _pin: PhantomPinned,
         }
@@ -405,6 +483,7 @@ impl<T> futures_core::stream::FusedStream for Receiver<T> {
 /// to be upgraded into a [`Sender`] through the `upgrade` method.
 pub struct WeakSender<T> {
     channel: Arc<Channel<T>>,
+    waker: Waker,
 }
 
 impl<T> WeakSender<T> {
@@ -425,6 +504,7 @@ impl<T> WeakSender<T> {
                 }
                 Ok(_) => Some(Sender {
                     channel: self.channel.clone(),
+                    waker: self.waker.clone(),
                 }),
             }
         }
@@ -435,6 +515,7 @@ impl<T> Clone for WeakSender<T> {
     fn clone(&self) -> Self {
         WeakSender {
             channel: self.channel.clone(),
+            waker: self.waker.clone(),
         }
     }
 }
@@ -451,6 +532,7 @@ impl<T> fmt::Debug for WeakSender<T> {
 /// to be upgraded into a [`Receiver`] through the `upgrade` method.
 pub struct WeakReceiver<T> {
     channel: Arc<Channel<T>>,
+    waker: Waker,
 }
 
 impl<T> WeakReceiver<T> {
@@ -471,6 +553,7 @@ impl<T> WeakReceiver<T> {
                 }
                 Ok(_) => Some(Receiver {
                     channel: self.channel.clone(),
+                    waker: self.waker.clone(),
                     listener: None,
                     _pin: PhantomPinned,
                 }),
@@ -483,6 +566,7 @@ impl<T> Clone for WeakReceiver<T> {
     fn clone(&self) -> Self {
         WeakReceiver {
             channel: self.channel.clone(),
+            waker: self.waker.clone(),
         }
     }
 }

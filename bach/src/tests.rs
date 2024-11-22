@@ -1,21 +1,19 @@
 use crate::{
     environment::default::Runtime,
     ext::*,
-    sync::{
-        duplex::Duplex,
-        queue::{sojourn, vec_deque},
-    },
+    sync::{duplex::Duplex, queue::vec_deque},
     time::{self, Duration, Instant},
 };
 use std::sync::atomic::{AtomicU64, Ordering};
 
-fn run(f: impl FnOnce()) {
+fn run(f: impl FnOnce()) -> Duration {
     crate::testing::init_tracing();
     let mut rt = Runtime::new();
     rt.run(f);
+    rt.elapsed()
 }
 
-type Queue<T> = sojourn::Queue<T, vec_deque::Queue<(T, Instant)>>;
+type Queue<T> = vec_deque::Queue<T>;
 
 fn duplex<T: 'static + Send + Sync>() -> (Duplex<T>, Duplex<T>) {
     <Duplex<T>>::pair(<Queue<T>>::default(), <Queue<T>>::default())
@@ -68,4 +66,39 @@ fn request_response() {
 
     assert_eq!(REQUEST_TIME.load(Ordering::Relaxed), 1.s());
     assert_eq!(RESPONSE_TIME.load(Ordering::Relaxed), 2.s());
+}
+
+#[test]
+fn latent_queue() {
+    static RECV_COUNT: AtomicU64 = AtomicU64::new(0);
+    const COUNT: u64 = 10;
+
+    let elapsed = run(|| {
+        let (sender, receiver) = Queue::default()
+            .latent(10.ms())
+            .sojourn()
+            .span("channel")
+            .channel();
+
+        async move {
+            for idx in 0..COUNT {
+                1.ms().sleep().await;
+                sender.send(idx).await.unwrap();
+            }
+        }
+        .primary()
+        .spawn_named("client");
+
+        async move {
+            while let Ok(idx) = receiver.pop().await {
+                dbg!(idx);
+                RECV_COUNT.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        .primary()
+        .spawn_named("server");
+    });
+
+    assert_eq!(elapsed, 20.ms());
+    assert_eq!(RECV_COUNT.load(Ordering::Relaxed), COUNT);
 }
