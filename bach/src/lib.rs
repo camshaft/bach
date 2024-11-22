@@ -1,6 +1,8 @@
 extern crate alloc;
 
 #[macro_use]
+mod tracing;
+#[macro_use]
 pub mod metrics;
 
 pub mod coop;

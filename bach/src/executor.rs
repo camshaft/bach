@@ -97,19 +97,21 @@ impl<E: Environment> Executor<E> {
             return Poll::Ready(0);
         }
 
+        struct Iter<'a> {
+            queue: &'a Queue,
+        }
+
+        impl<'a> IntoIterator for Iter<'a> {
+            type Item = Runnable;
+            type IntoIter = std::collections::vec_deque::IntoIter<Runnable>;
+
+            fn into_iter(self) -> Self::IntoIter {
+                self.queue.drain().into_iter()
+            }
+        }
+
         // make the drain lazy so the environment can be entered
-        let tasks = Some(&self.queue)
-            .into_iter()
-            .flat_map(|v| v.drain())
-            .map(|runnable| {
-                move || {
-                    if runnable.run() {
-                        Poll::Pending
-                    } else {
-                        Poll::Ready(())
-                    }
-                }
-            });
+        let tasks = Iter { queue: &self.queue };
 
         if self.environment.run(tasks).is_ready() {
             Poll::Ready(task_count)
@@ -250,6 +252,8 @@ impl Handle {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use crate::environment::Runnable;
+
     use super::*;
 
     pub fn executor() -> Executor<Env> {
@@ -264,14 +268,14 @@ pub(crate) mod tests {
             f()
         }
 
-        fn run<Tasks, F>(&mut self, tasks: Tasks) -> Poll<()>
+        fn run<Tasks, R>(&mut self, tasks: Tasks) -> Poll<()>
         where
-            Tasks: IntoIterator<Item = F>,
-            F: 'static + FnOnce() -> Poll<()> + Send,
+            Tasks: IntoIterator<Item = R>,
+            R: Runnable,
         {
             let mut is_ready = true;
             for task in tasks {
-                is_ready &= task().is_ready();
+                is_ready &= task.run().is_ready();
             }
             if is_ready {
                 Poll::Ready(())

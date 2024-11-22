@@ -111,7 +111,10 @@ pub use info::Info;
 
 pub(crate) mod info {
     use super::*;
-    use crate::define;
+    use crate::{
+        define,
+        tracing::{info_span, Span},
+    };
     use pin_project_lite::pin_project;
     use std::sync::Arc;
 
@@ -142,7 +145,7 @@ pub(crate) mod info {
             #[pin]
             inner: F,
             info: Info,
-            span: tracing::Span,
+            span: Span,
         }
     }
 
@@ -154,9 +157,10 @@ pub(crate) mod info {
                 Some(name.clone())
             };
             let span = if let Some(name) = &name {
-                tracing::info_span!("task", task = %name)
+                let _ = name;
+                info_span!("task", task = %name)
             } else {
-                tracing::info_span!("task", task = id)
+                info_span!("task", task = id)
             };
             let info = Info { id, name };
             Self { inner, info, span }

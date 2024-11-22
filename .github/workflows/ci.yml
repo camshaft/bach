@@ -95,6 +95,11 @@ jobs:
       matrix:
         rust: ${{ fromJson(needs.env.outputs.rust-versions) }}
         os: [ubuntu-latest, macOS-latest, windows-latest]
+        features: [default]
+        include:
+          - rust: stable
+            os: ubuntu-latest
+            features: tracing,metrics
     steps:
       - uses: actions/checkout@v4
         with:
@@ -112,7 +117,7 @@ jobs:
 
       - name: Run tests
         run: |
-          cargo test
+          cargo test ${{ matrix.features != 'default' && '--features' || '' }} ${{ matrix.features }}
 
   miri:
     runs-on: ubuntu-latest

@@ -1,34 +1,16 @@
 use core::task::Poll;
 
 pub mod default;
-
-mod macrostep {
-    #[derive(Clone, Copy, Debug, Default)]
-    pub struct Macrostep {
-        pub tasks: usize,
-        pub ticks: u64,
-    }
-
-    impl Macrostep {
-        pub fn metrics(&self) {
-            measure!("tasks", self.tasks as u32);
-            measure!(
-                "advance",
-                crate::time::resolution::ticks_to_duration(self.ticks)
-            );
-        }
-    }
-}
-
+mod macrostep;
 pub use macrostep::Macrostep;
 
 pub trait Environment {
     fn enter<F: FnOnce() -> O, O>(&self, f: F) -> O;
 
-    fn run<Tasks, F>(&mut self, tasks: Tasks) -> Poll<()>
+    fn run<Tasks, R>(&mut self, tasks: Tasks) -> Poll<()>
     where
-        Tasks: IntoIterator<Item = F>,
-        F: 'static + FnOnce() -> Poll<()> + Send;
+        Tasks: IntoIterator<Item = R>,
+        R: Runnable;
 
     fn on_macrostep(&mut self, macrostep: Macrostep) -> Macrostep {
         macrostep
@@ -38,9 +20,32 @@ pub trait Environment {
     where
         F: 'static + FnOnce() + Send,
     {
-        let _ = self.run(Some(move || {
-            close();
+        struct Close<F>(F);
+
+        impl<F> Runnable for Close<F>
+        where
+            F: 'static + FnOnce() + Send,
+        {
+            fn run(self) -> Poll<()> {
+                (self.0)();
+                Poll::Ready(())
+            }
+        }
+
+        let _ = self.run(Some(Close(close)));
+    }
+}
+
+pub trait Runnable: 'static + Send {
+    fn run(self) -> Poll<()>;
+}
+
+impl Runnable for async_task::Runnable {
+    fn run(self) -> Poll<()> {
+        if self.run() {
+            Poll::Pending
+        } else {
             Poll::Ready(())
-        }));
+        }
     }
 }

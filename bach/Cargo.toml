@@ -9,7 +9,9 @@ edition = "2021"
 
 [features]
 coop = []
+metrics = ["dep:metrics"]
 net = []
+tracing = ["dep:tracing"]
 
 [dependencies]
 arr_macro = "0.2"
@@ -19,10 +21,10 @@ event-listener-strategy = { version = "0.5.2", default-features = false }
 futures-core = { version = "0.3", default-features = false }
 intrusive-collections = "0.9"
 pin-project-lite = "0.2"
-metrics = "0.24"
+metrics = { version = "0.24", optional = true }
 rand = { version = "0.8", default-features = false }
 rand_xoshiro = "0.6"
-tracing = "0.1"
+tracing = { version = "0.1", optional = true }
 
 [dev-dependencies]
 bolero = "0.11"
@@ -32,4 +34,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 level = "warn"
 check-cfg = [
     'cfg(always_disabled)', # used to always disable something
+]
+
+[package.metadata.cargo-udeps.ignore]
+development = [
+     # keep this so it's easy to debug issues with tracing
+    "tracing-subscriber"
 ]

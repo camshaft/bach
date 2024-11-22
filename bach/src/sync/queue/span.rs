@@ -1,8 +1,10 @@
 use super::{CloseError, PopError, PushError};
+use crate::tracing::{info_span, Span};
 use core::{fmt, ops};
 use std::task::Context;
 
 pub struct Queue<Q> {
+    #[cfg_attr(not(feature = "tracing"), allow(dead_code))]
     name: &'static str,
     inner: Q,
 }
@@ -35,8 +37,8 @@ impl<Q> Queue<Q> {
         Self { name, inner }
     }
 
-    fn span(&self) -> tracing::Span {
-        tracing::info_span!("queue", queue = %self.name)
+    fn span(&self) -> Span {
+        info_span!("queue", queue = %self.name)
     }
 }
 
