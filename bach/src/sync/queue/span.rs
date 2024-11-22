@@ -1,5 +1,6 @@
 use super::{CloseError, PopError, PushError};
 use core::{fmt, ops};
+use std::task::Context;
 
 pub struct Queue<Q> {
     name: &'static str,
@@ -47,8 +48,17 @@ where
         self.span().in_scope(|| self.inner.push(value))
     }
 
+    fn push_with_context(&self, value: T, cx: &mut Context) -> Result<Option<T>, PushError<T>> {
+        self.span()
+            .in_scope(|| self.inner.push_with_context(value, cx))
+    }
+
     fn pop(&self) -> Result<T, PopError> {
         self.span().in_scope(|| self.inner.pop())
+    }
+
+    fn pop_with_context(&self, cx: &mut Context) -> Result<T, PopError> {
+        self.span().in_scope(|| self.inner.pop_with_context(cx))
     }
 
     fn close(&self) -> Result<(), CloseError> {

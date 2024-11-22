@@ -1,4 +1,4 @@
-use core::fmt;
+use core::{fmt, ops};
 
 mod bitset;
 mod entry;
@@ -18,6 +18,12 @@ pub fn sleep(duration: Duration) -> scheduler::Timer {
 
 pub use self::sleep as delay;
 
+pub fn sleep_until(target: Instant) -> scheduler::Timer {
+    let now = Instant::now();
+    let duration = target.0.saturating_sub(now.0);
+    sleep(duration)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub struct Instant(Duration);
 
@@ -32,6 +38,24 @@ impl Instant {
 
     pub fn elapsed_since_start(self) -> Duration {
         self.0
+    }
+
+    pub fn has_elapsed(&self) -> bool {
+        Self::now().ge(self)
+    }
+}
+
+impl ops::Add<Duration> for Instant {
+    type Output = Instant;
+
+    fn add(self, rhs: Duration) -> Self::Output {
+        Self(self.0 + rhs)
+    }
+}
+
+impl ops::AddAssign<Duration> for Instant {
+    fn add_assign(&mut self, rhs: Duration) {
+        self.0 += rhs;
     }
 }
 

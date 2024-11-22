@@ -1,6 +1,9 @@
 use core::time::Duration;
 
-pub use crate::group::GroupExt;
+pub use crate::{
+    group::GroupExt,
+    sync::queue::{InstantQueueExt, QueueExt},
+};
 
 pub trait DurationLiteral {
     fn s(self) -> Duration;

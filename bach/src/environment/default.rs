@@ -1,5 +1,6 @@
 use crate::{environment::Environment as _, executor, rand, time::scheduler};
 use core::task::Poll;
+use std::time::Duration;
 
 use super::Macrostep;
 
@@ -44,6 +45,13 @@ impl Runtime {
         F::Output: Send,
     {
         self.inner.block_on(f)
+    }
+
+    pub fn elapsed(&mut self) -> Duration {
+        self.inner
+            .environment()
+            .time
+            .enter(|| crate::time::Instant::now().elapsed_since_start())
     }
 }
 

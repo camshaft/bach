@@ -1,7 +1,7 @@
 use super::{CloseError, PopError, PushError};
 use alloc::collections::BinaryHeap;
 use core::fmt;
-use std::sync::Mutex;
+use std::{sync::Mutex, task::Context};
 
 #[derive(Default)]
 pub struct Builder {
@@ -107,6 +107,12 @@ where
         self.config.push(&mut inner.0, value)
     }
 
+    fn push_with_context(&self, value: T, cx: &mut Context) -> Result<Option<T>, PushError<T>> {
+        let value = self.push(value)?;
+        cx.waker().wake_by_ref();
+        Ok(value)
+    }
+
     fn pop(&self) -> Result<T, PopError> {
         let mut inner = self
             .queue
@@ -120,6 +126,12 @@ where
         count!("pop");
         self.config.record_len(&inner.0);
 
+        Ok(value)
+    }
+
+    fn pop_with_context(&self, cx: &mut Context) -> Result<T, PopError> {
+        let value = self.pop()?;
+        cx.waker().wake_by_ref();
         Ok(value)
     }
 

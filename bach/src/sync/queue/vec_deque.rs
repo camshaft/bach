@@ -1,7 +1,7 @@
 use super::{CloseError, PopError, PushError};
 use alloc::collections::VecDeque;
 use core::fmt;
-use std::sync::Mutex;
+use std::{sync::Mutex, task::Context};
 
 #[cfg(test)]
 mod tests;
@@ -201,6 +201,12 @@ impl<T> super::Queue<T> for Queue<T> {
         self.config.push(&mut inner.0, value)
     }
 
+    fn push_with_context(&self, value: T, cx: &mut Context) -> Result<Option<T>, PushError<T>> {
+        let value = self.push(value)?;
+        cx.waker().wake_by_ref();
+        Ok(value)
+    }
+
     fn pop(&self) -> Result<T, PopError> {
         let mut inner = self
             .queue
@@ -219,6 +225,12 @@ impl<T> super::Queue<T> for Queue<T> {
 
         self.config.record_len(&inner.0);
 
+        Ok(value)
+    }
+
+    fn pop_with_context(&self, cx: &mut Context) -> Result<T, PopError> {
+        let value = self.pop()?;
+        cx.waker().wake_by_ref();
         Ok(value)
     }
 
@@ -258,5 +270,39 @@ impl<T> super::Queue<T> for Queue<T> {
 
     fn capacity(&self) -> Option<usize> {
         self.config.capacity
+    }
+}
+
+impl<T> super::Conditional<T> for Queue<T> {
+    #[inline]
+    fn find_pop<F: Fn(&T) -> bool>(&self, check: F) -> Result<T, PopError> {
+        let mut inner = self
+            .queue
+            .lock()
+            .ok()
+            .filter(|v| !v.0.is_empty() || v.1)
+            .ok_or(PopError::Closed)?;
+
+        let queue = &mut inner.0;
+
+        let mut selected = None;
+        for (idx, value) in queue.iter().enumerate() {
+            if check(value) {
+                selected = Some(idx);
+            }
+        }
+
+        let selected = selected.ok_or(PopError::Empty)?;
+        let value = queue.remove(selected).unwrap();
+
+        count!(
+            "pop",
+            "discipline" = self.config.discipline.as_str(),
+            "overflow" = self.config.overflow.as_str(),
+        );
+
+        self.config.record_len(queue);
+
+        Ok(value)
     }
 }

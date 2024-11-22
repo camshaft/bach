@@ -1,5 +1,8 @@
+use crate::{sync::channel, time::Instant};
 use core::fmt;
+use std::task::Context;
 
+pub mod latent;
 pub mod priority;
 pub mod sojourn;
 pub mod span;
@@ -7,7 +10,11 @@ pub mod vec_deque;
 
 pub trait Queue<T> {
     fn push(&self, value: T) -> Result<Option<T>, PushError<T>>;
+    fn push_with_context(&self, value: T, cx: &mut Context) -> Result<Option<T>, PushError<T>>;
+
     fn pop(&self) -> Result<T, PopError>;
+    fn pop_with_context(&self, cx: &mut Context) -> Result<T, PopError>;
+
     fn close(&self) -> Result<(), CloseError>;
     fn is_closed(&self) -> bool;
     fn is_empty(&self) -> bool;
@@ -15,6 +22,42 @@ pub trait Queue<T> {
     fn len(&self) -> usize;
     fn capacity(&self) -> Option<usize>;
 }
+
+pub trait Conditional<T>: Queue<T> {
+    fn find_pop<F: Fn(&T) -> bool>(&self, check: F) -> Result<T, PopError>;
+}
+
+pub trait QueueExt<T>: 'static + Queue<T> + Sized + Send + Sync {
+    #[inline]
+    fn span(self, name: &'static str) -> span::Queue<Self> {
+        span::Queue::new(self, name)
+    }
+
+    #[inline]
+    fn channel(self) -> (channel::Sender<T>, channel::Receiver<T>) {
+        channel::new(self)
+    }
+}
+
+impl<Q, T> QueueExt<T> for Q where Q: 'static + Queue<T> + Sized + Send + Sync {}
+
+pub trait InstantQueueExt<T>: 'static + Queue<(Instant, T)> + Sized + Send + Sync {
+    #[inline]
+    fn sojourn(self) -> sojourn::Queue<T, Self> {
+        sojourn::Queue::new(self)
+    }
+
+    #[inline]
+    fn latent<L>(self, latency: L) -> latent::Queue<T, Self, L>
+    where
+        L: latent::Latency<T>,
+        Self: Conditional<(Instant, T)>,
+    {
+        latent::Queue::new(self, latency)
+    }
+}
+
+impl<Q, T> InstantQueueExt<T> for Q where Q: 'static + Queue<(Instant, T)> + Sized + Send + Sync {}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum PushError<T> {
