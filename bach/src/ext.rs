@@ -45,6 +45,7 @@ pub trait SpawnExt {
     type Output;
 
     fn spawn(self) -> Self::Output;
+    fn spawn_named<N: core::fmt::Display>(self, name: N) -> Self::Output;
 }
 
 impl<F> SpawnExt for F
@@ -56,6 +57,10 @@ where
 
     fn spawn(self) -> Self::Output {
         crate::task::spawn(self)
+    }
+
+    fn spawn_named<N: core::fmt::Display>(self, name: N) -> Self::Output {
+        crate::task::spawn_named(self, name)
     }
 }
 

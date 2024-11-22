@@ -13,11 +13,29 @@ pub enum Discipline {
     Lifo,
 }
 
+impl Discipline {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Discipline::Fifo => "fifo",
+            Discipline::Lifo => "lifo",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Overflow {
     PreferRecent,
     #[default]
     PreferOldest,
+}
+
+impl Overflow {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Overflow::PreferRecent => "prefer_recent",
+            Overflow::PreferOldest => "prefer_oldest",
+        }
+    }
 }
 
 #[derive(Default)]
@@ -72,8 +90,22 @@ impl Config {
 
         if self.is_full(queue) {
             match self.overflow {
-                Overflow::PreferOldest => return Err(PushError::Full(value)),
+                Overflow::PreferOldest => {
+                    count!(
+                        "full",
+                        "discipline" = self.discipline.as_str(),
+                        "overflow" = self.overflow.as_str(),
+                    );
+
+                    return Err(PushError::Full(value));
+                }
                 Overflow::PreferRecent => {
+                    count!(
+                        "shift",
+                        "discipline" = self.discipline.as_str(),
+                        "overflow" = self.overflow.as_str(),
+                    );
+
                     // shift the queue items around to make room for our new value
                     prev = match self.discipline {
                         Discipline::Fifo => queue.pop_front(),
@@ -83,10 +115,18 @@ impl Config {
             }
         }
 
+        count!(
+            "push",
+            "discipline" = self.discipline.as_str(),
+            "overflow" = self.overflow.as_str(),
+        );
+
         match self.discipline {
             Discipline::Fifo => queue.push_back(value),
             Discipline::Lifo => queue.push_front(value),
         }
+
+        self.record_len(queue);
 
         Ok(prev)
     }
@@ -98,6 +138,16 @@ impl Config {
         } else {
             false
         }
+    }
+
+    #[inline]
+    fn record_len<T>(&self, queue: &VecDeque<T>) {
+        measure!(
+            "len",
+            queue.len() as u32,
+            "discipline" = self.discipline.as_str(),
+            "overflow" = self.overflow.as_str(),
+        );
     }
 }
 
@@ -126,8 +176,15 @@ impl Queue<()> {
 
 impl<T> Queue<T> {
     pub fn drain(&self) -> VecDeque<T> {
+        count!(
+            "drain",
+            "discipline" = self.config.discipline.as_str(),
+            "overflow" = self.config.overflow.as_str()
+        );
+
         if let Ok(mut inner) = self.queue.lock() {
             let replacement = VecDeque::with_capacity(inner.0.capacity());
+            self.config.record_len(&replacement);
             core::mem::replace(&mut inner.0, replacement)
         } else {
             VecDeque::new()
@@ -149,16 +206,32 @@ impl<T> super::Queue<T> for Queue<T> {
             .queue
             .lock()
             .ok()
-            .filter(|v| v.1)
+            .filter(|v| !v.0.is_empty() || v.1)
             .ok_or(PopError::Closed)?;
 
-        inner.0.pop_front().ok_or(PopError::Empty)
+        let value = inner.0.pop_front().ok_or(PopError::Empty)?;
+
+        count!(
+            "pop",
+            "discipline" = self.config.discipline.as_str(),
+            "overflow" = self.config.overflow.as_str(),
+        );
+
+        self.config.record_len(&inner.0);
+
+        Ok(value)
     }
 
     fn close(&self) -> Result<(), super::CloseError> {
         let mut inner = self.queue.lock().map_err(|_| CloseError::AlreadyClosed)?;
         let prev = core::mem::replace(&mut inner.1, false);
         if prev {
+            count!(
+                "close",
+                "discipline" = self.config.discipline.as_str(),
+                "overflow" = self.config.overflow.as_str(),
+            );
+
             Ok(())
         } else {
             Err(CloseError::AlreadyClosed)
