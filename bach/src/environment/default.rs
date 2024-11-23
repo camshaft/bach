@@ -1,4 +1,4 @@
-use crate::{environment::Environment as _, executor, rand, time::scheduler};
+use crate::{coop::Coop, environment::Environment as _, executor, rand, time::scheduler};
 use core::task::Poll;
 use std::time::Duration;
 
@@ -13,8 +13,10 @@ impl Default for Runtime {
         let inner = executor::Executor::new(|handle| Environment {
             handle: handle.clone(),
             time: scheduler::Scheduler::new(),
-            rand: rand::Scope::new(0),
+            rand: Some(rand::Scope::new(0)),
+            coop: Coop::default(),
             stalled_iterations: 0,
+            coop_enabled: false,
         });
 
         Self { inner }
@@ -26,8 +28,17 @@ impl Runtime {
         Self::default()
     }
 
-    pub fn with_seed(mut self, seed: u64) -> Self {
-        self.inner.environment().rand = rand::Scope::new(seed);
+    pub fn with_seed(self, seed: u64) -> Self {
+        self.with_rand(Some(rand::Scope::new(seed)))
+    }
+
+    pub fn with_rand(mut self, rand: Option<rand::Scope>) -> Self {
+        self.inner.environment().rand = rand;
+        self
+    }
+
+    pub fn with_coop(mut self, enabled: bool) -> Self {
+        self.inner.environment().coop_enabled = enabled;
         self
     }
 
@@ -64,30 +75,53 @@ impl Drop for Runtime {
 pub struct Environment {
     handle: executor::Handle,
     time: scheduler::Scheduler,
-    rand: rand::Scope,
+    rand: Option<rand::Scope>,
     stalled_iterations: usize,
+    coop: Coop,
+    coop_enabled: bool,
     // TODO network
 }
 
 impl Environment {
     fn close<F: FnOnce()>(&mut self, f: F) {
         let handle = &mut self.handle;
-        let rand = &mut self.rand;
         let time = &mut self.time;
         handle.enter(|| {
-            rand.enter(|| {
+            let e = || {
                 time.close();
                 time.enter(|| {
                     f();
                 });
-            })
+            };
+
+            if let Some(rand) = self.rand.as_mut() {
+                rand.enter(e)
+            } else {
+                e()
+            }
         })
     }
 }
 
 impl super::Environment for Environment {
-    fn enter<F: FnOnce() -> O, O>(&self, f: F) -> O {
-        self.handle.enter(|| self.time.enter(|| self.rand.enter(f)))
+    fn enter<F: FnOnce() -> O, O>(&mut self, f: F) -> O {
+        self.handle.enter(|| {
+            self.time.enter(|| {
+                let e = || {
+                    if cfg!(feature = "coop") && self.coop_enabled {
+                        self.coop.enter(f)
+                    } else {
+                        f()
+                    }
+                };
+
+                if let Some(rand) = self.rand.as_mut() {
+                    rand.enter(e)
+                } else {
+                    e()
+                }
+            })
+        })
     }
 
     fn run<Tasks, R>(&mut self, tasks: Tasks) -> Poll<()>
@@ -97,20 +131,10 @@ impl super::Environment for Environment {
     {
         let mut is_ready = true;
 
-        let Self {
-            handle, time, rand, ..
-        } = self;
-
-        handle.enter(|| {
-            time.enter(|| {
-                rand.enter(|| {
-                    // TODO run network here
-
-                    for task in tasks {
-                        is_ready &= task.run().is_ready();
-                    }
-                })
-            })
+        self.enter(|| {
+            for task in tasks {
+                is_ready &= task.run().is_ready();
+            }
         });
 
         if is_ready {
@@ -125,6 +149,20 @@ impl super::Environment for Environment {
         if macrostep.tasks > 0 {
             self.stalled_iterations = 0;
             return macrostep;
+        }
+
+        if cfg!(feature = "coop") && self.coop_enabled {
+            let tasks = if let Some(rand) = self.rand.as_mut() {
+                rand.enter(|| self.coop.schedule())
+            } else {
+                self.coop.schedule()
+            };
+            macrostep.tasks += tasks;
+
+            if macrostep.tasks > 0 {
+                self.stalled_iterations = 0;
+                return macrostep;
+            }
         }
 
         self.stalled_iterations += 1;

@@ -1,0 +1,16 @@
+[package]
+name = "bach-tests"
+version = "0.0.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[dependencies]
+mimalloc = { version = "0.1", default-features = false }
+
+[dev-dependencies]
+bach = { path = "../bach", features = ["coop"] }
+bolero.workspace = true
+insta = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

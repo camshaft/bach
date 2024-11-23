@@ -5,7 +5,7 @@ mod macrostep;
 pub use macrostep::Macrostep;
 
 pub trait Environment {
-    fn enter<F: FnOnce() -> O, O>(&self, f: F) -> O;
+    fn enter<F: FnOnce() -> O, O>(&mut self, f: F) -> O;
 
     fn run<Tasks, R>(&mut self, tasks: Tasks) -> Poll<()>
     where

@@ -1,10 +1,4 @@
 pub fn init_tracing() {
-    #[cfg(feature = "tracing")]
-    init_tracing_impl();
-}
-
-#[cfg(feature = "tracing")]
-fn init_tracing_impl() {
     use std::sync::Once;
 
     static TRACING: Once = Once::new();
@@ -26,7 +20,7 @@ fn init_tracing_impl() {
                 w: &mut tracing_subscriber::fmt::format::Writer<'_>,
             ) -> std::fmt::Result {
                 let now =
-                    crate::time::scheduler::scope::try_borrow_mut_with(|s| Some(s.as_ref()?.now()));
+                    bach::time::scheduler::scope::try_borrow_mut_with(|s| Some(s.as_ref()?.now()));
                 if let Some(now) = now {
                     write!(w, "{now}")
                 } else {
