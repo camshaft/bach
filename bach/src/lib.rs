@@ -22,8 +22,3 @@ pub mod time;
 pub fn is_active() -> bool {
     task::scope::try_borrow_with(|scope| scope.is_some())
 }
-
-#[cfg(test)]
-mod testing;
-#[cfg(test)]
-mod tests;

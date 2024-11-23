@@ -303,8 +303,6 @@ pub(crate) mod tests {
 
     #[test]
     fn basic_test() {
-        crate::testing::init_tracing();
-
         let mut executor = executor();
 
         let queue = Arc::new(queue::vec_deque::Queue::default());

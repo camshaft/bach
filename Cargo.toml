@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "bach",
-    #"bach-*",
+    "bach-tests",
 ]
 resolver = "2"
 
@@ -19,3 +19,6 @@ codegen-units = 1
 [profile.release-debug]
 inherits = "dev"
 opt-level = 3
+
+[patch.crates-io]
+bolero-generator = { path = "../bolero/lib/bolero-generator" }

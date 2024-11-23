@@ -285,8 +285,6 @@ mod tests {
 
     #[test]
     fn timer_test() {
-        crate::testing::init_tracing();
-
         let min_time = Duration::from_nanos(1).as_nanos() as u64;
         let max_time = Duration::from_secs(3600).as_nanos() as u64;
 

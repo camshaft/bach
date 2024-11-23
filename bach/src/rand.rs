@@ -1,104 +1,150 @@
 use alloc::sync::Arc;
+use bolero_generator::{
+    driver::{self, object::DynDriver, Driver},
+    TypeGenerator, ValueGenerator,
+};
 use core::{
     future::Future,
     pin::Pin,
     task::{Context, Poll},
 };
 use pin_project_lite::pin_project;
-use rand::{distributions, prelude::*};
+use rand::prelude::*;
 use rand_xoshiro::Xoshiro256PlusPlus;
 use std::sync::Mutex;
 
+mod exhaustive;
+pub use exhaustive::Exhaustive;
+
 crate::scope::define!(scope, Scope);
 
+#[inline]
 pub fn fill_bytes(bytes: &mut [u8]) {
-    scope::borrow_mut_with(|scope| scope.fill_bytes(bytes))
+    driver(|driver| {
+        let len = bytes.len();
+        let _ = driver.gen_from_bytes(
+            || (len, Some(len)),
+            |src| {
+                bytes.copy_from_slice(src);
+                Some((src.len(), ()))
+            },
+        );
+    })
 }
 
+#[inline]
 pub fn fill<T>(values: &mut [T])
 where
-    [T]: rand::Fill,
+    T: TypeGenerator,
 {
-    scope::borrow_mut_with(|scope| scope.fill(values))
+    driver(|driver| {
+        for value in values {
+            *value = T::generate(driver).unwrap();
+        }
+    })
 }
 
+#[inline]
 pub fn gen<T>() -> T
 where
-    distributions::Standard: Distribution<T>,
+    T: TypeGenerator,
 {
-    scope::borrow_mut_with(|scope| scope.gen())
+    driver(|driver| T::generate(driver).unwrap())
 }
 
-pub fn gen_range<B, T>(range: B) -> T
+#[inline]
+pub fn gen_range<R>(range: R) -> R::Output
 where
-    B: distributions::uniform::SampleRange<T>,
-    T: distributions::uniform::SampleUniform + PartialOrd,
+    R: ValueGenerator,
 {
-    scope::borrow_mut_with(|scope| scope.gen_range(range))
+    driver(|driver| range.generate(driver).unwrap())
 }
 
+#[inline]
 pub fn shuffle<T>(items: &mut [T]) {
-    scope::borrow_mut_with(|scope| items.shuffle(scope))
+    driver(|driver| {
+        for i in (1..items.len()).rev() {
+            let idx = (0..=i).generate(driver).unwrap();
+            // invariant: elements with index > i have been locked in place.
+            items.swap(i, idx);
+        }
+    });
 }
 
+#[inline]
 pub fn swap<T>(items: &mut [T]) {
     swap_count(items, 1)
 }
 
+#[inline]
 pub fn swap_count<T>(items: &mut [T], count: usize) {
-    scope::borrow_mut_with(|r| {
-        let mut r = r.rng.lock().unwrap();
+    driver(|driver| {
         for _ in 0..count {
-            let a = r.gen_range(0..items.len());
-            let b = r.gen_range(0..items.len());
+            let a = (0..items.len()).generate(driver).unwrap();
+            let b = (0..items.len()).generate(driver).unwrap();
             items.swap(a, b)
         }
     })
 }
 
+#[inline]
 pub fn one_of<T>(items: &[T]) -> &T {
     let index = gen_range(0..items.len());
     &items[index]
 }
 
+fn driver<F: FnOnce(&mut driver::object::Borrowed) -> R, R>(f: F) -> R {
+    scope::borrow_mut_with(|scope| scope.with(f))
+}
+
 #[derive(Clone)]
 pub struct Scope {
-    rng: Arc<Mutex<Xoshiro256PlusPlus>>,
+    driver: Arc<Mutex<dyn DynDriver>>,
+    // if this scope allows for child scopes
+    can_have_children: bool,
 }
 
 impl Scope {
     pub fn new(seed: u64) -> Self {
         let rng = Xoshiro256PlusPlus::seed_from_u64(seed);
-        let rng = Arc::new(Mutex::new(rng));
-        Self { rng }
+        let driver = driver::Rng::new(rng, &Default::default());
+        let driver = driver::object::Object(driver);
+        let driver = Arc::new(Mutex::new(driver));
+        Self {
+            driver,
+            can_have_children: true,
+        }
     }
 
     pub fn enter<F: FnOnce() -> O, O>(&self, f: F) -> O {
-        scope::with(self.clone(), f)
+        let (prev, can_have_children) = scope::try_borrow_mut_with(|r| {
+            let can_have_children = r.as_ref().map_or(true, |r| r.can_have_children);
+            if !can_have_children {
+                return (None, false);
+            }
+            let prev = core::mem::replace(r, Some(self.clone()));
+            (prev, can_have_children)
+        });
+
+        if !can_have_children {
+            return f();
+        }
+
+        let out = f();
+        scope::set(prev);
+        out
+    }
+
+    fn with<F: FnOnce(&mut driver::object::Borrowed) -> R, R>(&self, f: F) -> R {
+        let mut driver = self.driver.lock().unwrap();
+        let mut driver = driver::object::Borrowed(&mut *driver);
+        f(&mut driver)
     }
 }
 
 impl From<u64> for Scope {
     fn from(value: u64) -> Self {
         Self::new(value)
-    }
-}
-
-impl RngCore for Scope {
-    fn next_u32(&mut self) -> u32 {
-        self.rng.lock().unwrap().next_u32()
-    }
-
-    fn next_u64(&mut self) -> u64 {
-        self.rng.lock().unwrap().next_u64()
-    }
-
-    fn fill_bytes(&mut self, bytes: &mut [u8]) {
-        self.rng.lock().unwrap().fill_bytes(bytes)
-    }
-
-    fn try_fill_bytes(&mut self, bytes: &mut [u8]) -> Result<(), rand::Error> {
-        self.rng.lock().unwrap().try_fill_bytes(bytes)
     }
 }
 

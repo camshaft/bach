@@ -1,0 +1,11 @@
+[package]
+name = "bach-tests"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+[dev-dependencies]
+bach = { path = "../bach", features = ["full"] }
+insta = "1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
