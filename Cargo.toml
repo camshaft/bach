@@ -1,9 +1,13 @@
 [workspace]
 members = [
     "bach",
-    #"bach-*",
+    "bach-tests",
 ]
 resolver = "2"
+
+[workspace.dependencies]
+bolero-generator = { version = "0.12", features = ["any"] }
+bolero = { version = "0.12" }
 
 [profile.bench]
 lto = true

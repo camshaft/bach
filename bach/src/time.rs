@@ -29,7 +29,11 @@ pub struct Instant(Duration);
 
 impl Instant {
     pub fn now() -> Self {
-        now()
+        scheduler::scope::borrow_with(|v| v.now())
+    }
+
+    pub fn try_now() -> Option<Self> {
+        scheduler::scope::try_borrow_with(|v| v.as_ref().map(|v| v.now()))
     }
 
     pub fn elapsed(self) -> Duration {
@@ -68,10 +72,6 @@ impl fmt::Display for Instant {
         let hours = duration.as_secs() / 60 / 60;
         write!(f, "{hours}:{mins:02}:{secs:02}.{nanos:09}")
     }
-}
-
-fn now() -> Instant {
-    scheduler::scope::borrow_with(|handle| handle.now())
 }
 
 pub use resolution::{tick_duration, with_tick_duration};

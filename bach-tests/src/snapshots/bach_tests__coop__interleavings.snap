@@ -1,0 +1,40 @@
+---
+source: bach-tests/src/coop.rs
+expression: LOG.lock().unwrap()
+---
+[
+    Start,
+    Message {
+        group: 0,
+        actor: 0,
+    },
+    Message {
+        group: 1,
+        actor: 0,
+    },
+    Message {
+        group: 0,
+        actor: 1,
+    },
+    Message {
+        group: 1,
+        actor: 1,
+    },
+    Start,
+    Message {
+        group: 0,
+        actor: 1,
+    },
+    Message {
+        group: 1,
+        actor: 1,
+    },
+    Message {
+        group: 0,
+        actor: 0,
+    },
+    Message {
+        group: 1,
+        actor: 0,
+    },
+]
