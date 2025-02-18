@@ -5,8 +5,7 @@ use core::{
     task::{Context, Poll},
 };
 use pin_project_lite::pin_project;
-use rand::prelude::*;
-use rand_xoshiro::Xoshiro256PlusPlus;
+use rand_xoshiro::{rand_core::SeedableRng, Xoshiro256PlusPlus};
 
 pub use bolero_generator::prelude::*;
 
