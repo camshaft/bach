@@ -101,7 +101,7 @@ impl<E: Environment> Executor<E> {
             queue: &'a Queue,
         }
 
-        impl<'a> IntoIterator for Iter<'a> {
+        impl IntoIterator for Iter<'_> {
             type Item = Runnable;
             type IntoIter = std::collections::vec_deque::IntoIter<Runnable>;
 

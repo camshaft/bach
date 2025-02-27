@@ -155,9 +155,7 @@ where
     }
 
     fn is_full(&self) -> bool {
-        self.queue
-            .lock()
-            .map_or(false, |l| self.config.is_full(&l.0))
+        self.queue.lock().is_ok_and(|l| self.config.is_full(&l.0))
     }
 
     fn len(&self) -> usize {
