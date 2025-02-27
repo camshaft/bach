@@ -605,7 +605,7 @@ pin_project! {
     }
 }
 
-impl<'a, T> EventListenerFuture for PushInner<'a, T> {
+impl<T> EventListenerFuture for PushInner<'_, T> {
     type Output = Result<(), PushError<T>>;
 
     /// Run this future with the given `Strategy`.
@@ -661,7 +661,7 @@ pin_project! {
     }
 }
 
-impl<'a, T> EventListenerFuture for PopInner<'a, T> {
+impl<T> EventListenerFuture for PopInner<'_, T> {
     type Output = Result<T, PopError>;
 
     /// Run this future with the given `Strategy`.
