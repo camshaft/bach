@@ -290,7 +290,7 @@ mod tests {
 
         let delay = min_time..max_time;
         let count = 0u8..3;
-        let delays = gen::<Vec<_>>().with().values((count, delay));
+        let delays = produce::<Vec<_>>().with().values((count, delay));
 
         check!()
             .with_generator(delays)

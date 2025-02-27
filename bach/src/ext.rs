@@ -2,7 +2,7 @@ use core::time::Duration;
 
 pub use crate::{
     group::GroupExt,
-    rand::{gen, Any, AnySliceExt, AnySliceMutExt},
+    rand::{produce, Any, AnySliceExt, AnySliceMutExt},
     sync::queue::{InstantQueueExt, QueueExt},
 };
 
