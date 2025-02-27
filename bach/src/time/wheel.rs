@@ -199,8 +199,8 @@ mod tests {
     fn insert_advance_wake_check() {
         let max_ticks = Duration::from_secs(100_000).as_nanos() as u64;
 
-        let entry = gen::<Vec<u64>>().with().values(0..max_ticks);
-        let entries = gen::<Vec<_>>().with().values(entry);
+        let entry = produce::<Vec<u64>>().with().values(0..max_ticks);
+        let entries = produce::<Vec<_>>().with().values(entry);
 
         check!().with_generator(entries).for_each(|entries| {
             test_helper(&entries[..]);
