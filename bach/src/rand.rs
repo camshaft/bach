@@ -25,7 +25,10 @@ impl Scope {
     }
 
     pub fn enter<F: FnOnce() -> O, O>(&mut self, f: F) -> O {
-        let driver = self.driver.take().unwrap();
+        let Some(driver) = self.driver.take() else {
+            // the task likely panicked so just execute the function without the random scope
+            return f();
+        };
         let (driver, res) = bolero_generator::any::scope::with(driver, f);
         self.driver = Some(driver);
         res
