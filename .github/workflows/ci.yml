@@ -143,3 +143,17 @@ jobs:
         env:
           # needed to read corpus files from filesystem
           MIRIFLAGS: -Zmiri-disable-isolation
+
+  kani:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: [bach]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Kani run
+        uses: model-checking/kani-github-action@v1.1
+        with:
+          working-directory: ${{ matrix.crate }}
