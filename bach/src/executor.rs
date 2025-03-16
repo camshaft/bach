@@ -8,7 +8,7 @@ use core::{
     future::Future,
     pin::Pin,
     sync::atomic::{AtomicU64, Ordering},
-    task::{Context, Poll, Waker},
+    task::{Context, Poll},
 };
 
 pub struct JoinHandle<Output>(Option<Task<Output>>);
@@ -138,18 +138,8 @@ impl<E: Environment> Executor<E> {
         T: 'static + Future<Output = Output> + Send,
         Output: 'static + Send,
     {
-        use core::task::{RawWaker, RawWakerVTable};
-
-        const VTABLE: RawWakerVTable = RawWakerVTable::new(clone, noop, noop, noop);
-        unsafe fn clone(ptr: *const ()) -> RawWaker {
-            RawWaker::new(ptr, &VTABLE)
-        }
-        unsafe fn noop(_ptr: *const ()) {
-            // noop
-        }
-
         let mut task = self.spawn(task);
-        let waker = unsafe { Waker::from_raw(clone(core::ptr::null())) };
+        let waker = crate::task::waker::noop();
         let mut ctx = Context::from_waker(&waker);
 
         loop {

@@ -28,6 +28,9 @@ rand = { version = "0.9", default-features = false }
 rand_xoshiro = "0.7"
 tracing = { version = "0.1", optional = true }
 
+[build-dependencies]
+autocfg = "1"
+
 [dev-dependencies]
 bolero.workspace = true
 

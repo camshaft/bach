@@ -3,6 +3,8 @@ use core::future::Future;
 
 crate::scope::define!(scope, Handle);
 
+pub(crate) mod waker;
+
 pub fn spawn<F, T>(future: F) -> JoinHandle<T>
 where
     F: 'static + Future<Output = T> + Send,
@@ -158,7 +160,7 @@ pub(crate) mod info {
             };
             let span = if let Some(name) = &name {
                 let _ = name;
-                info_span!("task", task = %name)
+                info_span!("task", task = ?name)
             } else {
                 info_span!("task", task = id)
             };

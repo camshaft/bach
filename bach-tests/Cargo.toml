@@ -5,11 +5,16 @@ edition = "2021"
 license = "MIT"
 publish = false
 
+[features]
+default = ["coop", "tracing"]
+coop = ["bach/coop"]
+tracing = ["bach/tracing"]
+
 [dependencies]
 mimalloc = { version = "0.1", default-features = false }
 
 [dev-dependencies]
-bach = { path = "../bach", features = ["coop"] }
+bach = { path = "../bach" }
 bolero.workspace = true
 insta = "1"
 tracing = "0.1"
