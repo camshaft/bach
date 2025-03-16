@@ -1,5 +1,8 @@
 use crate::executor::{Handle, JoinHandle};
-use core::future::Future;
+use core::{
+    future::{poll_fn, Future},
+    task::Poll,
+};
 
 crate::scope::define!(scope, Handle);
 
@@ -29,6 +32,18 @@ where
             }
         })
     })
+}
+
+pub async fn yield_now() {
+    let mut pending = true;
+    poll_fn(|cx| {
+        if core::mem::take(&mut pending) {
+            cx.waker().wake_by_ref();
+            return Poll::Pending;
+        }
+        Poll::Ready(())
+    })
+    .await
 }
 
 pub mod primary {
@@ -177,9 +192,10 @@ pub(crate) mod info {
             cx: &mut std::task::Context<'_>,
         ) -> std::task::Poll<Self::Output> {
             let this = self.project();
-            scope::with(this.info.clone(), || {
+            let (_info, res) = scope::with(this.info.clone(), || {
                 this.span.in_scope(|| this.inner.poll(cx))
-            })
+            });
+            res
         }
     }
 }

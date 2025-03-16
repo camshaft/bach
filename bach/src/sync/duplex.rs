@@ -1,6 +1,6 @@
 use super::{
     channel::{self, Receiver, Sender},
-    queue::Queue,
+    queue,
 };
 
 pub struct Duplex<S, R = S> {
@@ -11,8 +11,8 @@ pub struct Duplex<S, R = S> {
 impl<S, R> Duplex<S, R> {
     pub fn pair<AtoB, BtoA>(a_to_b: AtoB, b_to_a: BtoA) -> (Self, Duplex<R, S>)
     where
-        AtoB: Queue<S> + 'static + Send + Sync,
-        BtoA: Queue<R> + 'static + Send + Sync,
+        AtoB: queue::Shared<S> + 'static + Send + Sync,
+        BtoA: queue::Shared<R> + 'static + Send + Sync,
     {
         let (a_sender, b_receiver) = channel::new(a_to_b);
         let (b_sender, a_receiver) = channel::new(b_to_a);

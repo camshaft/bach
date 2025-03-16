@@ -2,7 +2,7 @@ use super::{
     entry::atomic::{self, ArcEntry},
     wheel::Wheel,
 };
-use crate::sync::queue::{self, Queue as _};
+use crate::{queue, sync::queue::Shared as _};
 use alloc::sync::Arc;
 use core::{
     fmt,
@@ -11,14 +11,16 @@ use core::{
     sync::atomic::{AtomicU64, Ordering},
     task::{Context, Poll},
 };
+use std::sync::Mutex;
 
 crate::scope::define!(scope, Handle);
 
-type Queue = Arc<queue::span::Queue<queue::vec_deque::Queue<ArcEntry>>>;
+type Queue = Arc<Mutex<queue::span::Queue<queue::vec_deque::Queue<ArcEntry>>>>;
 
 fn new_queue() -> Queue {
     let queue = queue::vec_deque::Queue::default();
     let queue = queue::span::Queue::new(queue, "bach::timer");
+    let queue = Mutex::new(queue);
     Arc::new(queue)
 }
 
@@ -63,7 +65,8 @@ impl Scheduler {
     }
 
     pub fn enter<F: FnOnce() -> O, O>(&self, f: F) -> O {
-        scope::with(self.handle(), f)
+        let (_, res) = scope::with(self.handle(), f);
+        res
     }
 
     /// Returns the amount of time until the next task
@@ -80,20 +83,21 @@ impl Scheduler {
 
     /// Wakes all of the expired tasks
     pub fn wake(&mut self) -> usize {
-        scope::with(self.handle(), || self.wheel.wake(atomic::wake))
+        let (_, res) = scope::with(self.handle(), || self.wheel.wake(atomic::wake));
+        res
     }
 
     /// Move the queued entries into the wheel
     pub fn collect(&mut self) {
-        scope::with(self.handle(), || {
-            for entry in self.queue.drain() {
+        let _ = scope::with(self.handle(), || {
+            for entry in self.queue.lock().unwrap().drain() {
                 self.wheel.insert(entry);
             }
-        })
+        });
     }
 
     pub fn close(&mut self) {
-        scope::with(self.handle(), || {
+        let _ = scope::with(self.handle(), || {
             self.wheel.close(|entry| {
                 // notify everything that we're shutting down
                 entry.wake();
@@ -157,7 +161,7 @@ struct InnerHandle {
 
 impl Handle {
     fn register(&self, entry: &ArcEntry) {
-        let _ = self.0.queue.push(entry.clone());
+        let _ = self.0.queue.push_lazy(&mut Some(entry.clone()));
     }
 }
 
@@ -169,9 +173,19 @@ pub struct Timer {
 }
 
 impl Timer {
+    pub fn reset(&mut self, target: super::Instant) {
+        *self = super::sleep_until(target);
+    }
+
     /// Cancels the timer
     pub fn cancel(&mut self) {
         self.entry.cancel();
+    }
+}
+
+impl fmt::Debug for Timer {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        f.debug_struct("Timer").finish()
     }
 }
 

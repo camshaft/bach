@@ -2,6 +2,9 @@ use crate::{coop::Coop, environment::Environment as _, executor, rand, time::sch
 use core::task::Poll;
 use std::time::Duration;
 
+#[cfg(feature = "net")]
+use crate::environment::net;
+
 use super::{Macrostep, Runnable};
 
 pub struct Runtime {
@@ -17,6 +20,8 @@ impl Default for Runtime {
             coop: Coop::default(),
             stalled_iterations: 0,
             coop_enabled: false,
+            #[cfg(feature = "net")]
+            net: Some(Default::default()),
         });
 
         Self { inner }
@@ -40,6 +45,37 @@ impl Runtime {
     pub fn with_coop(mut self, enabled: bool) -> Self {
         self.inner.environment().coop_enabled = enabled;
         self
+    }
+
+    #[cfg(feature = "net")]
+    pub fn with_net_queues(mut self, net: Option<Box<dyn net::queue::Allocator>>) -> Self {
+        if let Some(queue) = net {
+            let net = &mut self.inner.environment().net;
+            if let Some(net) = net.as_mut() {
+                net.set_queue(queue);
+            } else {
+                *net = Some(net::registry::Registry::new(queue));
+            };
+        } else {
+            self.inner.environment().net = None;
+        }
+        self
+    }
+
+    #[cfg(feature = "net")]
+    pub fn with_subnet(mut self, subnet: crate::net::IpAddr) -> Self {
+        if let Some(net) = self.inner.environment().net.as_mut() {
+            net.set_subnet(subnet);
+        }
+        self
+    }
+
+    #[cfg(feature = "net")]
+    pub fn with_pcap_dir<P: Into<std::path::PathBuf>>(mut self, dir: P) -> std::io::Result<Self> {
+        if let Some(net) = self.inner.environment().net.as_mut() {
+            net.set_pcap_dir(dir)?;
+        }
+        Ok(self)
     }
 
     pub fn run<F: FnOnce() -> R, R>(&mut self, f: F) -> R {
@@ -79,7 +115,8 @@ pub struct Environment {
     stalled_iterations: usize,
     coop: Coop,
     coop_enabled: bool,
-    // TODO network
+    #[cfg(feature = "net")]
+    net: Option<net::registry::Registry>,
 }
 
 impl Environment {
@@ -105,23 +142,57 @@ impl Environment {
 
 impl super::Environment for Environment {
     fn enter<F: FnOnce() -> O, O>(&mut self, f: F) -> O {
-        self.handle.enter(|| {
-            self.time.enter(|| {
-                let e = || {
-                    if cfg!(feature = "coop") && self.coop_enabled {
-                        self.coop.enter(f)
+        let f = {
+            #[cfg(not(feature = "coop"))]
+            {
+                f
+            }
+
+            #[cfg(feature = "coop")]
+            {
+                let enabled = self.coop_enabled;
+                let coop = &mut self.coop;
+                move || {
+                    if enabled {
+                        coop.enter(f)
                     } else {
                         f()
                     }
-                };
-
-                if let Some(rand) = self.rand.as_mut() {
-                    rand.enter(e)
-                } else {
-                    e()
                 }
-            })
-        })
+            }
+        };
+
+        let f = {
+            #[cfg(not(feature = "net"))]
+            {
+                f
+            }
+
+            #[cfg(feature = "net")]
+            {
+                let net = &mut self.net;
+                move || {
+                    if let Some(v) = net.take() {
+                        let (v, res) = net::registry::scope::with(v, f);
+                        *net = Some(v);
+                        res
+                    } else {
+                        f()
+                    }
+                }
+            }
+        };
+
+        let rand = self.rand.as_mut();
+        let f = move || {
+            if let Some(rand) = rand {
+                rand.enter(f)
+            } else {
+                f()
+            }
+        };
+
+        self.handle.enter(|| self.time.enter(f))
     }
 
     fn run<Tasks, R>(&mut self, tasks: Tasks) -> Poll<()>
@@ -152,11 +223,19 @@ impl super::Environment for Environment {
         }
 
         if cfg!(feature = "coop") && self.coop_enabled {
-            let tasks = if let Some(rand) = self.rand.as_mut() {
-                rand.enter(|| self.coop.schedule())
-            } else {
-                self.coop.schedule()
+            let coop = &mut self.coop;
+            let f = || coop.schedule();
+
+            let f = || {
+                if let Some(rand) = self.rand.as_mut() {
+                    rand.enter(f)
+                } else {
+                    f()
+                }
             };
+
+            let tasks = self.handle.enter(|| self.time.enter(f));
+
             macrostep.tasks += tasks;
 
             if macrostep.tasks > 0 {

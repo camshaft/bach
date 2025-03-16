@@ -2,6 +2,8 @@ use core::task::Poll;
 
 pub mod default;
 mod macrostep;
+#[cfg(feature = "net")]
+pub mod net;
 pub use macrostep::Macrostep;
 
 pub trait Environment {

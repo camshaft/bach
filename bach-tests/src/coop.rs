@@ -1,7 +1,7 @@
-use bach::{environment::default::Runtime, ext::*, sync::queue::vec_deque::Queue};
+use bach::{environment::default::Runtime, ext::*, queue::vec_deque::Queue};
 use std::{collections::HashMap, sync::Mutex};
 
-fn sim(f: impl Fn()) -> impl Fn() {
+pub fn sim(f: impl Fn()) -> impl Fn() {
     crate::testing::init_tracing();
     move || {
         let mut rt = Runtime::new().with_coop(true).with_rand(None);
@@ -64,7 +64,11 @@ fn interleavings() {
         LOG.lock().unwrap().push(Event::Start);
 
         for group in 0..2 {
-            let (sender, receiver) = Queue::builder().with_capacity(Some(20)).build().channel();
+            let (sender, mut receiver) = Queue::builder()
+                .with_capacity(Some(20))
+                .build()
+                .mutex()
+                .channel();
 
             async move {
                 while let Ok((sender_group, sender_id)) = receiver.pop().await {
@@ -83,7 +87,7 @@ fn interleavings() {
             .spawn_named(format!("[{group}] server"));
 
             for id in 0..2 {
-                let sender = sender.clone();
+                let mut sender = sender.clone();
                 async move {
                     for _ in 0..1 {
                         sender.push((group, id)).await.unwrap();
@@ -95,7 +99,7 @@ fn interleavings() {
         }
     }));
 
-    insta::assert_debug_snapshot!(Event::check(&*LOG.lock().unwrap()));
+    insta::assert_debug_snapshot!(Event::check(&LOG.lock().unwrap()));
 }
 
 #[test]
@@ -106,10 +110,14 @@ fn joined_interleavings() {
         LOG.lock().unwrap().push(Event::Start);
         eprintln!("start");
 
-        let (sender, receiver) = Queue::builder().with_capacity(Some(20)).build().channel();
+        let (sender, receiver) = Queue::builder()
+            .with_capacity(Some(20))
+            .build()
+            .mutex()
+            .channel();
 
         for group in 0..2 {
-            let receiver = receiver.clone();
+            let mut receiver = receiver.clone();
             async move {
                 while let Ok((sender_group, sender_id)) = receiver.pop().await {
                     LOG.lock().unwrap().push(Event::Message {
@@ -127,7 +135,7 @@ fn joined_interleavings() {
             .spawn_named(format!("[{group}] server"));
 
             for id in 0..1 {
-                let sender = sender.clone();
+                let mut sender = sender.clone();
                 async move {
                     for _ in 0..1 {
                         sender.push((group, id)).await.unwrap();
@@ -139,5 +147,5 @@ fn joined_interleavings() {
         }
     }));
 
-    insta::assert_debug_snapshot!(Event::check(&*LOG.lock().unwrap()));
+    insta::assert_debug_snapshot!(Event::check(&LOG.lock().unwrap()));
 }

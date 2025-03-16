@@ -1,13 +1,14 @@
 use crate::{
     coop::Operation,
-    sync::queue::{CloseError, PopError, PushError, Queue},
+    queue::{CloseError, PopError, PushError, Pushable},
+    sync::queue::Shared as Queue,
 };
 use alloc::sync::Arc;
 use core::{
     fmt,
     future::Future,
     marker::{PhantomData, PhantomPinned},
-    pin::Pin,
+    pin::{pin, Pin},
     sync::atomic::{AtomicUsize, Ordering},
     task::{Context, Poll},
 };
@@ -104,6 +105,7 @@ where
     let sender = Sender {
         channel: channel.clone(),
         waker: sender_waker,
+        listener: None,
     };
 
     let receiver = Receiver {
@@ -179,30 +181,57 @@ fn waker<Q, T, const IS_SEND: bool>(channel: &Arc<Channel<T, Q>>) -> Waker {
 pub struct Sender<T> {
     /// Inner channel state.
     channel: Arc<Channel<T>>,
+
+    // Listens for a send or close event to unblock this stream.
+    listener: Option<EventListener>,
+
     waker: Waker,
 }
 
 impl<T> Sender<T> {
-    /// Attempts to push a message into the channel.
-    pub fn try_push(&self, msg: T) -> Result<Option<T>, PushError<T>> {
-        let mut ctx = core::task::Context::from_waker(&self.waker);
-        self.channel.queue.push_with_context(msg, &mut ctx)
-    }
-
-    /// Pushes a message into the channel.
-    pub async fn push(&self, msg: T) -> Result<(), PushError<T>> {
+    /// Pushes a message into the channel, waiting for capacity to become available
+    pub async fn push(&mut self, msg: T) -> Result<(), PushError> {
         self.channel.send_resource.acquire().await;
+
+        let mut msg = Some(msg);
 
         Push::_new(PushInner {
             sender: self,
-            msg: Some(msg),
-            listener: None,
+            msg: &mut msg,
             _pin: PhantomPinned,
         })
         .await
     }
 
-    pub async fn send(&self, msg: T) -> Result<(), PushError<T>> {
+    /// Pushes a message into the channel, but doesn't wait for capacity to become available
+    pub async fn push_nowait(&mut self, msg: T) -> Result<Option<T>, PushError> {
+        self.channel.send_resource.acquire().await;
+
+        let mut msg = Some(msg);
+        match self.push_unchecked(&mut msg) {
+            Ok(prev) => Ok(prev),
+            Err(PushError::Full) => Ok(msg.take()),
+            Err(PushError::Closed) => Err(PushError::Closed),
+        }
+    }
+
+    pub fn poll_push<P: Pushable<T>>(
+        &mut self,
+        cx: &mut Context,
+        msg: &mut P,
+    ) -> Poll<Result<(), PushError>> {
+        ready!(self.channel.send_resource.poll_acquire(cx));
+
+        let mut p = Push::_new(PushInner {
+            sender: self,
+            msg,
+            _pin: PhantomPinned,
+        });
+        let p = pin!(p);
+        p.poll(cx)
+    }
+
+    pub async fn send(&mut self, msg: T) -> Result<(), PushError> {
         self.push(msg).await
     }
 
@@ -258,6 +287,12 @@ impl<T> Sender<T> {
     pub fn same_channel(&self, other: &Sender<T>) -> bool {
         Arc::ptr_eq(&self.channel, &other.channel)
     }
+
+    #[inline]
+    fn push_unchecked(&self, msg: &mut dyn Pushable<T>) -> Result<Option<T>, PushError> {
+        let mut ctx = core::task::Context::from_waker(&self.waker);
+        self.channel.queue.push_with_notify(msg, &mut ctx)
+    }
 }
 
 impl<T> Drop for Sender<T> {
@@ -287,6 +322,7 @@ impl<T> Clone for Sender<T> {
         Sender {
             channel: self.channel.clone(),
             waker: self.waker.clone(),
+            listener: None,
         }
     }
 }
@@ -326,25 +362,29 @@ pin_project! {
 }
 
 impl<T> Receiver<T> {
-    /// Attempts to pop a message from the channel.
-    pub fn try_pop(&self) -> Result<T, PopError> {
-        let mut ctx = core::task::Context::from_waker(&self.waker);
-        self.channel.queue.pop_with_context(&mut ctx)
-    }
-
     /// Pops a message from the channel.
-    pub async fn pop(&self) -> Result<T, PopError> {
+    pub async fn pop(&mut self) -> Result<T, PopError> {
         self.channel.recv_resource.acquire().await;
 
         Pop::_new(PopInner {
             receiver: self,
-            listener: None,
             _pin: PhantomPinned,
         })
         .await
     }
 
-    pub async fn recv(&self) -> Result<T, PopError> {
+    pub fn poll_pop(&mut self, cx: &mut Context) -> Poll<Result<T, PopError>> {
+        ready!(self.channel.recv_resource.poll_acquire(cx));
+
+        let mut p = Pop::_new(PopInner {
+            receiver: self,
+            _pin: PhantomPinned,
+        });
+        let p = pin!(p);
+        p.poll(cx)
+    }
+
+    pub async fn recv(&mut self) -> Result<T, PopError> {
         self.pop().await
     }
 
@@ -400,6 +440,12 @@ impl<T> Receiver<T> {
     pub fn same_channel(&self, other: &Receiver<T>) -> bool {
         Arc::ptr_eq(&self.channel, &other.channel)
     }
+
+    #[inline]
+    fn pop_unchecked(&self) -> Result<T, PopError> {
+        let mut ctx = core::task::Context::from_waker(&self.waker);
+        self.channel.queue.pop_with_notify(&mut ctx)
+    }
 }
 
 impl<T> fmt::Debug for Receiver<T> {
@@ -430,6 +476,8 @@ impl<T> Stream for Receiver<T> {
     type Item = T;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        ready!(self.channel.recv_resource.poll_acquire(cx));
+
         loop {
             // If this stream is listening for events, first wait for a notification.
             {
@@ -442,7 +490,7 @@ impl<T> Stream for Receiver<T> {
 
             loop {
                 // Attempt to receive a message.
-                match self.try_pop() {
+                match self.pop_unchecked() {
                     Ok(msg) => {
                         // The stream is not blocked on an event - drop the listener.
                         let this = self.as_mut().project();
@@ -505,6 +553,7 @@ impl<T> WeakSender<T> {
                 Ok(_) => Some(Sender {
                     channel: self.channel.clone(),
                     waker: self.waker.clone(),
+                    listener: None,
                 }),
             }
         }
@@ -579,25 +628,20 @@ impl<T> fmt::Debug for WeakReceiver<T> {
 
 easy_wrapper! {
     /// A future returned by [`Sender::push()`].
-    #[derive(Debug)]
     #[must_use = "futures do nothing unless you `.await` or poll them"]
-    pub struct Push<'a, T>(PushInner<'a, T> => Result<(), PushError<T>>);
+    pub struct Push<'a, T, P: Pushable<T>>(PushInner<'a, T, P> => Result<(), PushError>);
     #[cfg(always_disabled)]
     pub(self) wait();
 }
 
 pin_project! {
-    #[derive(Debug)]
     #[project(!Unpin)]
-    struct PushInner<'a, T> {
+    struct PushInner<'a, T, P> {
         // Reference to the original sender.
-        sender: &'a Sender<T>,
+        sender: &'a mut Sender<T>,
 
         // The message to send.
-        msg: Option<T>,
-
-        // Listener waiting on the channel.
-        listener: Option<EventListener>,
+        msg: &'a mut P,
 
         // Keeping this type `!Unpin` enables future optimizations.
         #[pin]
@@ -605,32 +649,31 @@ pin_project! {
     }
 }
 
-impl<T> EventListenerFuture for PushInner<'_, T> {
-    type Output = Result<(), PushError<T>>;
+impl<T, P: Pushable<T>> EventListenerFuture for PushInner<'_, T, P> {
+    type Output = Result<(), PushError>;
 
     /// Run this future with the given `Strategy`.
     fn poll_with_strategy<'x, S: Strategy<'x>>(
         self: Pin<&mut Self>,
         strategy: &mut S,
         context: &mut S::Context,
-    ) -> Poll<Result<(), PushError<T>>> {
+    ) -> Poll<Result<(), PushError>> {
         let this = self.project();
 
         loop {
-            let msg = this.msg.take().unwrap();
             // Attempt to send a message.
-            match this.sender.try_push(msg) {
+            match this.sender.push_unchecked(*this.msg) {
                 Ok(_) => return Poll::Ready(Ok(())),
-                Err(PushError::Full(m)) => *this.msg = Some(m),
-                Err(error) => return Poll::Ready(Err(error)),
+                Err(PushError::Full) => {}
+                Err(PushError::Closed) => return Poll::Ready(Err(PushError::Closed)),
             }
 
             // Sending failed - now start listening for notifications or wait for one.
-            if this.listener.is_some() {
+            if this.sender.listener.is_some() {
                 // Poll using the given strategy
-                ready!(S::poll(strategy, &mut *this.listener, context));
+                ready!(S::poll(strategy, &mut this.sender.listener, context));
             } else {
-                *this.listener = Some(this.sender.channel.send_ops.listen());
+                this.sender.listener = Some(this.sender.channel.send_ops.listen());
             }
         }
     }
@@ -650,10 +693,7 @@ pin_project! {
     #[project(!Unpin)]
     struct PopInner<'a, T> {
         // Reference to the receiver.
-        receiver: &'a Receiver<T>,
-
-        // Listener waiting on the channel.
-        listener: Option<EventListener>,
+        receiver: &'a mut Receiver<T>,
 
         // Keeping this type `!Unpin` enables future optimizations.
         #[pin]
@@ -674,18 +714,18 @@ impl<T> EventListenerFuture for PopInner<'_, T> {
 
         loop {
             // Attempt to receive a message.
-            match this.receiver.try_pop() {
+            match this.receiver.pop_unchecked() {
                 Ok(msg) => return Poll::Ready(Ok(msg)),
                 Err(PopError::Empty) => {}
                 Err(error) => return Poll::Ready(Err(error)),
             }
 
             // Receiving failed - now start listening for notifications or wait for one.
-            if this.listener.is_some() {
+            if this.receiver.listener.is_some() {
                 // Poll using the given strategy
-                ready!(S::poll(strategy, &mut *this.listener, cx));
+                ready!(S::poll(strategy, &mut this.receiver.listener, cx));
             } else {
-                *this.listener = Some(this.receiver.channel.recv_ops.listen());
+                this.receiver.listener = Some(this.receiver.channel.recv_ops.listen());
             }
         }
     }

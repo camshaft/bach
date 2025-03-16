@@ -1,6 +1,7 @@
 use crate::{
     environment::{Environment, Macrostep},
-    sync::queue::{self, Queue as _},
+    queue,
+    sync::queue::Shared as _,
 };
 use alloc::sync::Arc;
 use async_task::{Runnable, Task};
@@ -10,6 +11,7 @@ use core::{
     sync::atomic::{AtomicU64, Ordering},
     task::{Context, Poll},
 };
+use std::sync::Mutex;
 
 pub struct JoinHandle<Output>(Option<Task<Output>>);
 
@@ -45,11 +47,12 @@ impl<T> Drop for JoinHandle<T> {
     }
 }
 
-type Queue = Arc<queue::span::Queue<queue::vec_deque::Queue<Runnable>>>;
+type Queue = Arc<Mutex<queue::span::Queue<queue::vec_deque::Queue<Runnable>>>>;
 
 fn new_queue() -> Queue {
     let queue = queue::vec_deque::Queue::default();
     let queue = queue::span::Queue::new(queue, "bach::executor");
+    let queue = Mutex::new(queue);
     Arc::new(queue)
 }
 
@@ -106,7 +109,7 @@ impl<E: Environment> Executor<E> {
             type IntoIter = std::collections::vec_deque::IntoIter<Runnable>;
 
             fn into_iter(self) -> Self::IntoIter {
-                self.queue.drain().into_iter()
+                self.queue.lock().unwrap().drain().into_iter()
             }
         }
 
@@ -169,8 +172,9 @@ impl<E: Environment> Executor<E> {
         // drop the pending items in the queue first
         let queue = self.queue.clone();
         self.environment.close(move || {
+            let tasks = queue.lock().unwrap().drain();
             let _ = queue.close();
-            drop(queue.drain());
+            drop(tasks);
         });
     }
 }
@@ -189,6 +193,10 @@ pub struct Handle {
 }
 
 impl Handle {
+    pub fn current() -> Self {
+        crate::task::scope::borrow_with(|handle| handle.clone())
+    }
+
     pub fn spawn<F, Output>(&self, future: F) -> JoinHandle<Output>
     where
         F: Future<Output = Output> + Send + 'static,
@@ -218,7 +226,7 @@ impl Handle {
             } else {
                 count!("wake", "target" = name.clone());
             }
-            let _ = sender.push(runnable);
+            let _ = sender.push_lazy(&mut Some(runnable));
         });
 
         // queue the initial poll
@@ -228,7 +236,8 @@ impl Handle {
     }
 
     pub fn enter<F: FnOnce() -> O, O>(&self, f: F) -> O {
-        crate::task::scope::with(self.clone(), f)
+        let (_, res) = crate::task::scope::with(self.clone(), f);
+        res
     }
 
     pub fn primary_guard(&self) -> crate::task::primary::Guard {
@@ -242,9 +251,8 @@ impl Handle {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use crate::environment::Runnable;
-
     use super::*;
+    use crate::{environment::Runnable, queue::QueueExt as _};
 
     pub fn executor() -> Executor<Env> {
         Executor::new(|_| Env)
@@ -295,7 +303,7 @@ pub(crate) mod tests {
     fn basic_test() {
         let mut executor = executor();
 
-        let queue = Arc::new(queue::vec_deque::Queue::default());
+        let queue = Arc::new(queue::vec_deque::Queue::default().mutex());
 
         crate::task::scope::with(executor.handle().clone(), || {
             use crate::task::spawn;
@@ -303,21 +311,21 @@ pub(crate) mod tests {
             let s1 = queue.clone();
             spawn(async move {
                 Yield::default().await;
-                let _ = s1.push("hello");
+                let _ = s1.push_lazy(&mut Some("hello"));
                 Yield::default().await;
             });
 
             let s2 = queue.clone();
             let exclaimation = async move {
                 Yield::default().await;
-                let _ = s2.push("!!!!!");
+                let _ = s2.push_lazy(&mut Some("!!!!!"));
                 Yield::default().await;
             };
 
             let s3 = queue.clone();
             spawn(async move {
                 Yield::default().await;
-                let _ = s3.push("world");
+                let _ = s3.push_lazy(&mut Some("world"));
                 Yield::default().await;
                 exclaimation.await;
                 Yield::default().await;
@@ -327,7 +335,7 @@ pub(crate) mod tests {
         executor.macrostep();
 
         let mut output = String::new();
-        for chunk in queue.drain() {
+        for chunk in queue.lock().unwrap().drain() {
             output.push_str(chunk);
         }
 

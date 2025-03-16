@@ -1,12 +1,12 @@
 use super::*;
-use crate::sync::queue::Queue as _;
+use crate::queue::Queue as _;
 
 /// Overflow behavior should be the same regardless of discipline
 macro_rules! overflow_tests {
     () => {
         #[test]
         fn prefer_oldest() {
-            let queue = Queue::builder()
+            let mut queue = Queue::builder()
                 .with_capacity(Some(2))
                 .with_discipline(DISCIPLINE)
                 .with_overflow(Overflow::PreferOldest)
@@ -14,12 +14,12 @@ macro_rules! overflow_tests {
 
             queue.push(0).unwrap();
             queue.push(1).unwrap();
-            assert!(matches!(queue.push(2), Err(PushError::Full(2))));
+            assert!(matches!(queue.push_lazy(&mut None), Err(PushError::Full)));
         }
 
         #[test]
         fn prefer_recent() {
-            let queue = Queue::builder()
+            let mut queue = Queue::builder()
                 .with_capacity(Some(2))
                 .with_discipline(DISCIPLINE)
                 .with_overflow(Overflow::PreferRecent)
@@ -27,7 +27,9 @@ macro_rules! overflow_tests {
 
             queue.push(0).unwrap();
             queue.push(1).unwrap();
-            assert!(matches!(queue.push(2), Ok(Some(0))));
+            let mut v = Some(2);
+            assert!(matches!(queue.push_lazy(&mut v), Ok(Some(0))));
+            assert_eq!(v, None);
         }
     };
 }
@@ -36,7 +38,7 @@ macro_rules! push_pop_test {
     ([$($value:expr),* $(,)?]) => {
         #[test]
         fn push_pop() {
-            let queue = Queue::builder()
+            let mut queue = Queue::builder()
                 .with_discipline(DISCIPLINE)
                 .build();
 

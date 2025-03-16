@@ -1,7 +1,7 @@
-use super::{CloseError, PopError, PushError};
+use super::{CloseError, PopError, PushError, Pushable};
 use alloc::collections::VecDeque;
 use core::fmt;
-use std::{sync::Mutex, task::Context};
+use std::task::Context;
 
 #[cfg(test)]
 mod tests;
@@ -72,8 +72,11 @@ impl Builder {
         } else {
             VecDeque::new()
         };
-        let queue = Mutex::new((queue, true));
-        Queue { config, queue }
+        Queue {
+            config,
+            queue,
+            is_open: true,
+        }
     }
 }
 
@@ -85,7 +88,11 @@ struct Config {
 
 impl Config {
     #[inline]
-    fn push<T>(&self, queue: &mut VecDeque<T>, value: T) -> Result<Option<T>, PushError<T>> {
+    fn push<T, P: Pushable<T> + ?Sized>(
+        &self,
+        queue: &mut VecDeque<T>,
+        value: &mut P,
+    ) -> Result<Option<T>, PushError> {
         let mut prev = None;
 
         if self.is_full(queue) {
@@ -97,7 +104,7 @@ impl Config {
                         "overflow" = self.overflow.as_str(),
                     );
 
-                    return Err(PushError::Full(value));
+                    return Err(PushError::Full);
                 }
                 Overflow::PreferRecent => {
                     count!(
@@ -121,6 +128,7 @@ impl Config {
             "overflow" = self.overflow.as_str(),
         );
 
+        let value = value.produce();
         match self.discipline {
             Discipline::Fifo => queue.push_back(value),
             Discipline::Lifo => queue.push_front(value),
@@ -153,7 +161,8 @@ impl Config {
 
 pub struct Queue<T> {
     config: Config,
-    queue: Mutex<(VecDeque<T>, bool)>,
+    queue: VecDeque<T>,
+    is_open: bool,
 }
 
 impl<T> Default for Queue<T> {
@@ -175,47 +184,40 @@ impl Queue<()> {
 }
 
 impl<T> Queue<T> {
-    pub fn drain(&self) -> VecDeque<T> {
+    pub fn drain(&mut self) -> VecDeque<T> {
         count!(
             "drain",
             "discipline" = self.config.discipline.as_str(),
             "overflow" = self.config.overflow.as_str()
         );
 
-        if let Ok(mut inner) = self.queue.lock() {
-            let replacement = VecDeque::with_capacity(inner.0.capacity());
-            self.config.record_len(&replacement);
-            core::mem::replace(&mut inner.0, replacement)
-        } else {
-            VecDeque::new()
-        }
+        let replacement = VecDeque::with_capacity(self.queue.capacity());
+        self.config.record_len(&replacement);
+        core::mem::replace(&mut self.queue, replacement)
     }
 }
 
 impl<T> super::Queue<T> for Queue<T> {
-    fn push(&self, value: T) -> Result<Option<T>, PushError<T>> {
-        let Some(mut inner) = self.queue.lock().ok().filter(|v| v.1) else {
-            return Err(PushError::Closed(value));
-        };
-
-        self.config.push(&mut inner.0, value)
+    fn push_lazy(&mut self, value: &mut dyn Pushable<T>) -> Result<Option<T>, PushError> {
+        self.config.push(&mut self.queue, value)
     }
 
-    fn push_with_context(&self, value: T, cx: &mut Context) -> Result<Option<T>, PushError<T>> {
-        let value = self.push(value)?;
+    fn push_with_notify(
+        &mut self,
+        value: &mut dyn Pushable<T>,
+        cx: &mut Context,
+    ) -> Result<Option<T>, PushError> {
+        let value = self.push_lazy(value)?;
         cx.waker().wake_by_ref();
         Ok(value)
     }
 
-    fn pop(&self) -> Result<T, PopError> {
-        let mut inner = self
-            .queue
-            .lock()
-            .ok()
-            .filter(|v| !v.0.is_empty() || v.1)
-            .ok_or(PopError::Closed)?;
+    fn pop(&mut self) -> Result<T, PopError> {
+        if self.queue.is_empty() && !self.is_open {
+            return Err(PopError::Closed);
+        }
 
-        let value = inner.0.pop_front().ok_or(PopError::Empty)?;
+        let value = self.queue.pop_front().ok_or(PopError::Empty)?;
 
         count!(
             "pop",
@@ -223,20 +225,19 @@ impl<T> super::Queue<T> for Queue<T> {
             "overflow" = self.config.overflow.as_str(),
         );
 
-        self.config.record_len(&inner.0);
+        self.config.record_len(&self.queue);
 
         Ok(value)
     }
 
-    fn pop_with_context(&self, cx: &mut Context) -> Result<T, PopError> {
+    fn pop_with_notify(&mut self, cx: &mut Context) -> Result<T, PopError> {
         let value = self.pop()?;
         cx.waker().wake_by_ref();
         Ok(value)
     }
 
-    fn close(&self) -> Result<(), super::CloseError> {
-        let mut inner = self.queue.lock().map_err(|_| CloseError::AlreadyClosed)?;
-        let prev = core::mem::replace(&mut inner.1, false);
+    fn close(&mut self) -> Result<(), super::CloseError> {
+        let prev = core::mem::replace(&mut self.is_open, false);
         if prev {
             count!(
                 "close",
@@ -251,19 +252,19 @@ impl<T> super::Queue<T> for Queue<T> {
     }
 
     fn is_closed(&self) -> bool {
-        self.queue.lock().map_or(true, |l| l.1)
+        !self.is_open
     }
 
     fn is_empty(&self) -> bool {
-        self.queue.lock().map_or(true, |l| l.0.is_empty() || !l.1)
+        self.queue.is_empty()
     }
 
     fn is_full(&self) -> bool {
-        self.queue.lock().is_ok_and(|l| self.config.is_full(&l.0))
+        self.config.is_full(&self.queue)
     }
 
     fn len(&self) -> usize {
-        self.queue.lock().map_or(0, |l| l.0.len())
+        self.queue.len()
     }
 
     fn capacity(&self) -> Option<usize> {
@@ -273,20 +274,18 @@ impl<T> super::Queue<T> for Queue<T> {
 
 impl<T> super::Conditional<T> for Queue<T> {
     #[inline]
-    fn find_pop<F: Fn(&T) -> bool>(&self, check: F) -> Result<T, PopError> {
-        let mut inner = self
-            .queue
-            .lock()
-            .ok()
-            .filter(|v| !v.0.is_empty() || v.1)
-            .ok_or(PopError::Closed)?;
+    fn find_pop<F: Fn(&T) -> bool>(&mut self, check: F) -> Result<T, PopError> {
+        if self.queue.is_empty() && !self.is_open {
+            return Err(PopError::Closed);
+        }
 
-        let queue = &mut inner.0;
+        let queue = &mut self.queue;
 
         let mut selected = None;
         for (idx, value) in queue.iter().enumerate() {
             if check(value) {
                 selected = Some(idx);
+                break;
             }
         }
 
