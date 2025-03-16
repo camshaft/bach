@@ -14,16 +14,6 @@ expression: "Event::check(&*LOG.lock().unwrap())"
         sender_group: 1,
         sender_id: 0,
     },
-    Message {
-        receiver: 0,
-        sender_group: 0,
-        sender_id: 1,
-    },
-    Message {
-        receiver: 1,
-        sender_group: 1,
-        sender_id: 1,
-    },
     ReceiverClose {
         receiver: 0,
     },
@@ -34,21 +24,45 @@ expression: "Event::check(&*LOG.lock().unwrap())"
     Message {
         receiver: 0,
         sender_group: 0,
-        sender_id: 1,
+        sender_id: 0,
     },
     Message {
         receiver: 1,
         sender_group: 1,
-        sender_id: 1,
+        sender_id: 0,
+    },
+    ReceiverClose {
+        receiver: 1,
+    },
+    ReceiverClose {
+        receiver: 0,
+    },
+    Start,
+    Message {
+        receiver: 1,
+        sender_group: 1,
+        sender_id: 0,
     },
     Message {
         receiver: 0,
         sender_group: 0,
         sender_id: 0,
     },
+    ReceiverClose {
+        receiver: 1,
+    },
+    ReceiverClose {
+        receiver: 0,
+    },
+    Start,
     Message {
         receiver: 1,
         sender_group: 1,
+        sender_id: 0,
+    },
+    Message {
+        receiver: 0,
+        sender_group: 0,
         sender_id: 0,
     },
     ReceiverClose {

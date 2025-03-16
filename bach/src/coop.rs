@@ -1,13 +1,35 @@
-use crate::{define, ext::*};
+use crate::{define, ext::*, tracing::*};
 use std::{
-    collections::{BTreeMap, VecDeque},
-    future::Future,
-    pin::Pin,
+    collections::{btree_map::Entry, BTreeMap},
+    future::poll_fn,
     sync::{Arc, Mutex},
-    task::{Context, Poll, Waker},
+    task::{ready, Context, Poll, Waker},
 };
 
 define!(scope, Coop);
+
+trait WakerExt {
+    fn id(&self) -> usize;
+}
+
+impl WakerExt for Waker {
+    fn id(&self) -> usize {
+        #[cfg(feature_waker_data)]
+        {
+            self.data() as usize
+        }
+        #[cfg(not(feature_waker_data))]
+        {
+            // Use the task ID instead of the waker pointer.
+            // This may lead to issues when the same task is using different wakers
+            // but should be rare. The `DisjointSet` impl has checks to prevent the
+            // execution from continuing so it should be safe.
+            crate::task::Info::current().id() as _
+        }
+    }
+}
+
+mod disjoint_set;
 
 #[derive(Clone, Default)]
 pub struct Coop(Arc<Mutex<State>>);
@@ -15,37 +37,49 @@ pub struct Coop(Arc<Mutex<State>>);
 #[derive(Default)]
 struct State {
     id: u64,
-    operations: BTreeMap<Operation, VecDeque<Task>>,
+    set: disjoint_set::DisjointSet,
+    status: BTreeMap<(usize, Operation), Poll<()>>,
     moves: Vec<usize>,
 }
 
 impl State {
     fn schedule(&mut self) -> usize {
-        let mut woken_tasks = 0;
-        let mut max_len = 0;
+        let max_group_size = self.set.max_group_size() as usize;
 
-        // First look at all of the pending tasks and find the `max_len`
-        for tasks in self.operations.values() {
-            woken_tasks += tasks.len();
-            max_len = max_len.max(tasks.len());
+        trace!(?max_group_size);
+
+        if max_group_size == 0 {
+            if cfg!(test) {
+                assert!(self.status.iter().all(|(_id, status)| status.is_ready()));
+            }
+            self.status.clear();
+            return 0;
         }
 
-        // Generate a set of interleavings from the `max_len` value
+        // Generate a set of interleavings from the `max_depth` value
         //
         // We generate this once with the assumption that each operation
         // interleaving is independent from one another. Doing so can drastically
         // cut down on the required search space.
         // See: https://en.wikipedia.org/wiki/Partial_order_reduction
         self.moves.clear();
-        let max_dst = max_len.saturating_sub(1);
+        let max_dst = max_group_size.saturating_sub(1);
         for src in 0..max_dst {
             let dst = (src..=max_dst).any();
             self.moves.push(dst);
         }
 
-        self.operations.retain(|_operation, tasks| {
+        for status in self.status.values_mut() {
+            *status = Poll::Ready(());
+        }
+
+        self.set.schedule(|tasks| {
+            if cfg!(test) {
+                assert!((2..=(self.moves.len() + 1)).contains(&tasks.len()));
+            }
+
             for (src, dst) in self.moves.iter().copied().enumerate() {
-                // make sure the src applies to this set of tasks
+                // return is the moves exceed the number of tasks for this group
                 if src == tasks.len() {
                     break;
                 }
@@ -56,16 +90,36 @@ impl State {
                 }
             }
 
-            for task in tasks.drain(..) {
-                // dropping it wakes it up
-                drop(task)
+            // wake all of the tasks after applying the moves
+            for waker in tasks.drain(..) {
+                waker.wake();
             }
+        })
+    }
 
-            // clear out everything
-            false
-        });
+    fn poll_acquire(&mut self, cx: &mut Context, operation: Operation) -> Poll<()> {
+        let waker = cx.waker();
 
-        woken_tasks
+        let waker_id = waker.id();
+
+        let key = (waker_id, operation);
+        match self.status.entry(key) {
+            Entry::Vacant(entry) => {
+                entry.insert(Poll::Pending);
+
+                trace!(operation = operation.0, "pending");
+
+                self.set.join(waker, waker_id, operation.0);
+                Poll::Pending
+            }
+            Entry::Occupied(entry) => {
+                ready!(*entry.get());
+
+                trace!(operation = operation.0, "ready");
+
+                entry.remove()
+            }
+        }
     }
 }
 
@@ -85,23 +139,8 @@ impl Coop {
         Operation(id)
     }
 
-    fn acquire(&mut self, cx: &mut Context<'_>, resource: &Operation) -> Waiting {
-        let handle = Arc::new(());
-
-        let task = Task {
-            waker: cx.waker().clone(),
-            handle: handle.clone(),
-        };
-
-        self.0
-            .lock()
-            .unwrap()
-            .operations
-            .entry(*resource)
-            .or_default()
-            .push_back(task);
-
-        Waiting { handle }
+    fn poll_acquire(&mut self, cx: &mut Context<'_>, operation: Operation) -> Poll<()> {
+        self.0.lock().unwrap().poll_acquire(cx, operation)
     }
 }
 
@@ -115,7 +154,7 @@ impl Operation {
         }
 
         scope::try_borrow_mut_with(|coop| coop.as_mut().map(|coop| coop.resource()))
-            .unwrap_or(Operation(u64::MAX))
+            .unwrap_or(Self(u64::MAX))
     }
 
     pub async fn acquire(&self) {
@@ -123,46 +162,15 @@ impl Operation {
             return;
         }
 
-        let Some(future) = core::future::poll_fn(|cx| {
-            Poll::Ready(scope::try_borrow_mut_with(|coop| {
-                coop.as_mut().map(|coop| coop.acquire(cx, self))
-            }))
-        })
-        .await
-        else {
-            return;
-        };
-
-        future.await;
+        poll_fn(|cx| self.poll_acquire(cx)).await
     }
-}
 
-pub struct Task {
-    waker: Waker,
-    #[allow(dead_code)] // this just holds the `Waiting` future open
-    handle: Arc<()>,
-}
-
-impl Drop for Task {
-    fn drop(&mut self) {
-        self.waker.wake_by_ref()
-    }
-}
-
-#[derive(Debug)]
-#[must_use = "futures do nothing unless you `.await` or poll them"]
-pub struct Waiting {
-    handle: Arc<()>,
-}
-
-impl Future for Waiting {
-    type Output = ();
-
-    fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
-        if Arc::strong_count(&self.handle) > 1 {
-            count!("yield");
-            return Poll::Pending;
+    pub fn poll_acquire(&self, cx: &mut Context<'_>) -> Poll<()> {
+        if cfg!(not(feature = "coop")) {
+            return Poll::Ready(());
         }
-        Poll::Ready(())
+
+        scope::try_borrow_mut_with(|coop| coop.as_mut().map(|coop| coop.poll_acquire(cx, *self)))
+            .unwrap_or(Poll::Ready(()))
     }
 }
