@@ -40,6 +40,7 @@ autocfg = "1"
 [dev-dependencies]
 bolero.workspace = true
 bytes = "1"
+pcap-parser = "0.16"
 tokio = { version = "1", default-features = false }
 
 [lints.rust.unexpected_cfgs]

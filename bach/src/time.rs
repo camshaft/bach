@@ -55,6 +55,12 @@ impl Instant {
     pub fn saturating_duration_since(self, earlier: Instant) -> Duration {
         self.0.saturating_sub(earlier.0)
     }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) fn zero() -> Self {
+        Self(Duration::ZERO)
+    }
 }
 
 impl ops::Add<Duration> for Instant {

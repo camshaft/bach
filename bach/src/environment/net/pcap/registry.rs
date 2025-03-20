@@ -57,21 +57,13 @@ impl Registry {
         Ok(())
     }
 
-    pub(crate) fn dns(
-        &mut self,
-        group: &Group,
-        local_ip: &IpAddr,
-        query: &str,
-        ip: &IpAddr,
-    ) -> bool {
+    pub(crate) fn dns(&mut self, group: &Group, query: &str, ip: &IpAddr) -> bool {
         self.with_entry(group, |state| {
             if state.dns.contains(query) {
                 return false;
             }
 
-            let local_addr = std::net::SocketAddr::new(*local_ip, 53);
-
-            let _ = super::dns::write(&mut state.writer, &local_addr, query, ip);
+            let _ = super::dns::write(&mut state.writer, query, ip);
 
             state.dns.insert(query.to_string());
 

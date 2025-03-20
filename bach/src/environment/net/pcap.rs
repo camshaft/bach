@@ -1,6 +1,7 @@
 use crate::time::Instant;
 use std::io;
 
+pub mod block;
 mod dns;
 mod queue;
 mod registry;
@@ -19,8 +20,8 @@ pub trait AsPcap {
         Ok(len.finish())
     }
 
-    fn as_pcap_record(&self) -> Record<&Self> {
-        Record::new(Instant::now(), self)
+    fn as_pcap_record(&self) -> block::EnhancedPacket<&Self> {
+        block::EnhancedPacket::new(Instant::now(), self)
     }
 
     fn as_pcap_bytes(&self) -> Vec<u8> {
@@ -36,57 +37,33 @@ impl<T: AsPcap> AsPcap for &T {
     }
 }
 
-pub struct Record<T> {
-    timestamp: Instant,
-    inner: T,
-}
-
-impl<T> Record<T> {
-    pub fn new(timestamp: Instant, inner: T) -> Self {
-        Self { timestamp, inner }
+impl AsPcap for () {
+    fn as_pcap<W: io::Write>(&self, _out: &mut W) -> io::Result<()> {
+        Ok(())
     }
 }
 
-impl<T: AsPcap> AsPcap for Record<T> {
+impl AsPcap for u8 {
     fn as_pcap<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
-        //= https://www.ietf.org/archive/id/draft-gharris-opsawg-pcap-01.html#section-5
-        //#     1                   2                   3
-        //#     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-        //#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-        //#   0 |                      Timestamp (Seconds)                      |
-        //#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-        //#   4 |            Timestamp (Microseconds or nanoseconds)            |
-        //#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-        //#   8 |                    Captured Packet Length                     |
-        //#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-        //#  12 |                    Original Packet Length                     |
-        //#     +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-        //#  16 /                                                               /
-        //#     /                          Packet Data                          /
-        //#     /                        variable length                        /
-        //#     /                                                               /
-        //#     +---------------------------------------------------------------+
-        let timestamp = self.timestamp.elapsed_since_start();
-        let secs: u32 = timestamp
-            .as_secs()
-            .try_into()
-            .map_err(|_err| io::Error::new(io::ErrorKind::InvalidData, "max timestamp exceeded"))?;
-        let nanos: u32 = timestamp.subsec_nanos();
+        out.write_all(&[*self])
+    }
+}
 
-        out.write_all(&secs.to_ne_bytes())?;
-        out.write_all(&nanos.to_ne_bytes())?;
+impl AsPcap for u16 {
+    fn as_pcap<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        out.write_all(&self.to_le_bytes())
+    }
+}
 
-        let packet_len: u32 =
-            self.inner.pcap_len()?.try_into().map_err(|_| {
-                io::Error::new(io::ErrorKind::InvalidData, "max payload size exceeded")
-            })?;
+impl AsPcap for u32 {
+    fn as_pcap<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        out.write_all(&self.to_le_bytes())
+    }
+}
 
-        out.write_all(&packet_len.to_ne_bytes())?;
-        out.write_all(&packet_len.to_ne_bytes())?;
-
-        self.inner.as_pcap(out)?;
-
-        Ok(())
+impl AsPcap for [u8] {
+    fn as_pcap<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
+        out.write_all(self)
     }
 }
 

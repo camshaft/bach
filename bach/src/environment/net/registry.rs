@@ -82,11 +82,8 @@ impl Registry {
 
             let group_name = group.name();
 
-            // resolve the group's hostname so it can perform a fake DNS query
-            let local_ip = self.resolve_host(group, &group_name)?;
-
             // inject a DNS packet in the pcap
-            let first_time = self.pcaps.dns(group, &local_ip, name, &ip);
+            let first_time = self.pcaps.dns(group, name, &ip);
 
             // if this is the first time `group` has queried `name`, then do a reverse query
             // on the owner so the pcaps come through correctly on the other side
@@ -112,7 +109,7 @@ impl Registry {
         self.hostnames.insert(group_name, (*group, ip));
         self.groups.insert(*group, GroupState::default());
 
-        self.pcaps.dns(group, &ip, name, &ip);
+        self.pcaps.dns(group, name, &ip);
 
         Ok(ip)
     }
