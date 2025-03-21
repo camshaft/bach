@@ -19,11 +19,11 @@ macro_rules! define {
             }
 
             #[allow(dead_code)]
-            pub fn with<F: FnOnce() -> R, R>(value: $ty, f: F) -> R {
+            pub fn with<F: FnOnce() -> R, R>(value: $ty, f: F) -> ($ty, R) {
                 let prev = set(Some(value));
                 let res = f();
-                let _ = set(prev);
-                res
+                let value = set(prev).unwrap();
+                (value, res)
             }
 
             #[allow(dead_code)]

@@ -1,7 +1,7 @@
-use super::{CloseError, PopError, PushError};
+use super::{CloseError, PopError, PushError, Pushable};
 use alloc::collections::BinaryHeap;
 use core::fmt;
-use std::{sync::Mutex, task::Context};
+use std::task::Context;
 
 #[derive(Default)]
 pub struct Builder {
@@ -26,8 +26,11 @@ impl Builder {
         } else {
             BinaryHeap::new()
         };
-        let queue = Mutex::new((queue, true));
-        Queue { config, queue }
+        Queue {
+            config,
+            queue,
+            is_open: true,
+        }
     }
 }
 
@@ -37,18 +40,22 @@ struct Config {
 
 impl Config {
     #[inline]
-    fn push<T>(&self, queue: &mut BinaryHeap<T>, value: T) -> Result<Option<T>, PushError<T>>
+    fn push<T, P: Pushable<T> + ?Sized>(
+        &self,
+        queue: &mut BinaryHeap<T>,
+        value: &mut P,
+    ) -> Result<Option<T>, PushError>
     where
         T: core::cmp::Ord,
     {
         if self.is_full(queue) {
             count!("full");
 
-            return Err(PushError::Full(value));
+            return Err(PushError::Full);
         }
 
         count!("push");
-        queue.push(value);
+        queue.push(value.produce());
         self.record_len(queue);
 
         Ok(None)
@@ -71,7 +78,8 @@ impl Config {
 
 pub struct Queue<T> {
     config: Config,
-    queue: Mutex<(BinaryHeap<T>, bool)>,
+    queue: BinaryHeap<T>,
+    is_open: bool,
 }
 
 impl<T> Default for Queue<T>
@@ -99,45 +107,41 @@ impl<T> super::Queue<T> for Queue<T>
 where
     T: core::cmp::Ord,
 {
-    fn push(&self, value: T) -> Result<Option<T>, PushError<T>> {
-        let Some(mut inner) = self.queue.lock().ok().filter(|v| v.1) else {
-            return Err(PushError::Closed(value));
-        };
-
-        self.config.push(&mut inner.0, value)
+    fn push_lazy(&mut self, value: &mut dyn Pushable<T>) -> Result<Option<T>, PushError> {
+        self.config.push(&mut self.queue, value)
     }
 
-    fn push_with_context(&self, value: T, cx: &mut Context) -> Result<Option<T>, PushError<T>> {
-        let value = self.push(value)?;
+    fn push_with_notify(
+        &mut self,
+        value: &mut dyn Pushable<T>,
+        cx: &mut Context,
+    ) -> Result<Option<T>, PushError> {
+        let value = self.push_lazy(value)?;
         cx.waker().wake_by_ref();
         Ok(value)
     }
 
-    fn pop(&self) -> Result<T, PopError> {
-        let mut inner = self
-            .queue
-            .lock()
-            .ok()
-            .filter(|v| !v.0.is_empty() || v.1)
-            .ok_or(PopError::Closed)?;
+    fn pop(&mut self) -> Result<T, PopError> {
+        if self.queue.is_empty() && !self.is_open {
+            return Err(PopError::Closed);
+        }
 
-        let value = inner.0.pop().ok_or(PopError::Empty)?;
+        let value = self.queue.pop().ok_or(PopError::Empty)?;
 
         count!("pop");
-        self.config.record_len(&inner.0);
+        self.config.record_len(&self.queue);
 
         Ok(value)
     }
 
-    fn pop_with_context(&self, cx: &mut Context) -> Result<T, PopError> {
+    fn pop_with_notify(&mut self, cx: &mut Context) -> Result<T, PopError> {
         let value = self.pop()?;
         cx.waker().wake_by_ref();
         Ok(value)
     }
 
-    fn close(&self) -> Result<(), super::CloseError> {
-        let mut inner = self.queue.lock().map_err(|_| CloseError::AlreadyClosed)?;
-        let prev = core::mem::replace(&mut inner.1, false);
+    fn close(&mut self) -> Result<(), super::CloseError> {
+        let prev = core::mem::replace(&mut self.is_open, false);
         if prev {
             count!("close");
             Ok(())
@@ -147,19 +151,19 @@ where
     }
 
     fn is_closed(&self) -> bool {
-        self.queue.lock().map_or(true, |l| l.1)
+        !self.is_open
     }
 
     fn is_empty(&self) -> bool {
-        self.queue.lock().map_or(true, |l| l.0.is_empty() || !l.1)
+        self.queue.is_empty()
     }
 
     fn is_full(&self) -> bool {
-        self.queue.lock().is_ok_and(|l| self.config.is_full(&l.0))
+        self.config.is_full(&self.queue)
     }
 
     fn len(&self) -> usize {
-        self.queue.lock().map_or(0, |l| l.0.len())
+        self.queue.len()
     }
 
     fn capacity(&self) -> Option<usize> {

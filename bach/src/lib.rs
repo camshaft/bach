@@ -10,13 +10,17 @@ pub mod environment;
 pub mod executor;
 pub mod ext;
 pub mod group;
-#[cfg(any(test, feature = "net"))]
+#[cfg(feature = "net")]
 pub mod net;
+pub mod queue;
 pub mod rand;
+pub mod runtime;
 pub mod scope;
 pub mod sync;
 pub mod task;
 pub mod time;
+
+pub use task::spawn;
 
 /// Returns `true` if the caller is being executed in a `bach` environment
 pub fn is_active() -> bool {

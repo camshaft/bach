@@ -1,4 +1,4 @@
-use crate::{define, ext::*, tracing::*};
+use crate::{define, ext::*};
 use std::{
     collections::{btree_map::Entry, BTreeMap},
     future::poll_fn,
@@ -46,7 +46,7 @@ impl State {
     fn schedule(&mut self) -> usize {
         let max_group_size = self.set.max_group_size() as usize;
 
-        trace!(?max_group_size);
+        measure!("max_group_size", max_group_size as f64);
 
         if max_group_size == 0 {
             if cfg!(test) {
@@ -107,7 +107,7 @@ impl State {
             Entry::Vacant(entry) => {
                 entry.insert(Poll::Pending);
 
-                trace!(operation = operation.0, "pending");
+                count!("pending", "operation" = operation.0.to_string());
 
                 self.set.join(waker, waker_id, operation.0);
                 Poll::Pending
@@ -115,7 +115,7 @@ impl State {
             Entry::Occupied(entry) => {
                 ready!(*entry.get());
 
-                trace!(operation = operation.0, "ready");
+                count!("ready", "operation" = operation.0.to_string());
 
                 entry.remove()
             }
@@ -125,7 +125,8 @@ impl State {
 
 impl Coop {
     pub fn enter<F: FnOnce() -> R, R>(&self, f: F) -> R {
-        scope::with(self.clone(), f)
+        let (_, res) = scope::with(self.clone(), f);
+        res
     }
 
     pub fn schedule(&self) -> usize {

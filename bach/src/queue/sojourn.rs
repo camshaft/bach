@@ -1,4 +1,4 @@
-use super::{CloseError, PopError, PushError};
+use super::{CloseError, PopError, PushError, Pushable};
 use crate::time::Instant;
 use core::fmt;
 use std::{marker::PhantomData, task::Context};
@@ -33,49 +33,58 @@ impl<T, Q> Queue<T, Q> {
     }
 }
 
+struct WithTimestamp<'a, T>(&'a mut dyn Pushable<T>);
+
+impl<T> Pushable<(Instant, T)> for WithTimestamp<'_, T> {
+    fn produce(&mut self) -> (Instant, T) {
+        let value = self.0.produce();
+        (Instant::now(), value)
+    }
+}
+
 impl<T, Q> super::Queue<T> for Queue<T, Q>
 where
     Q: super::Queue<(Instant, T)>,
 {
-    fn push(&self, value: T) -> Result<Option<T>, PushError<T>> {
-        let value = (Instant::now(), value);
-        match self.inner.push(value) {
-            Ok(None) => Ok(None),
-            Ok(Some((t, value))) => {
+    fn push_lazy(&mut self, value: &mut dyn Pushable<T>) -> Result<Option<T>, PushError> {
+        let mut value = WithTimestamp(value);
+        match self.inner.push_lazy(&mut value)? {
+            None => Ok(None),
+            Some((t, value)) => {
                 measure!("sojourn_time", t.elapsed());
                 Ok(Some(value))
             }
-            Err(PushError::Closed((_, value))) => Err(PushError::Closed(value)),
-            Err(PushError::Full((_, value))) => Err(PushError::Full(value)),
         }
     }
 
-    fn push_with_context(&self, value: T, cx: &mut Context) -> Result<Option<T>, PushError<T>> {
-        let value = (Instant::now(), value);
-        match self.inner.push_with_context(value, cx) {
-            Ok(None) => Ok(None),
-            Ok(Some((t, value))) => {
+    fn push_with_notify(
+        &mut self,
+        value: &mut dyn Pushable<T>,
+        cx: &mut Context,
+    ) -> Result<Option<T>, PushError> {
+        let mut value = WithTimestamp(value);
+        match self.inner.push_with_notify(&mut value, cx)? {
+            None => Ok(None),
+            Some((t, value)) => {
                 measure!("sojourn_time", t.elapsed());
                 Ok(Some(value))
             }
-            Err(PushError::Closed((_, value))) => Err(PushError::Closed(value)),
-            Err(PushError::Full((_, value))) => Err(PushError::Full(value)),
         }
     }
 
-    fn pop(&self) -> Result<T, PopError> {
+    fn pop(&mut self) -> Result<T, PopError> {
         let (t, value) = self.inner.pop()?;
         measure!("sojourn_time", t.elapsed());
         Ok(value)
     }
 
-    fn pop_with_context(&self, cx: &mut Context) -> Result<T, PopError> {
-        let (t, value) = self.inner.pop_with_context(cx)?;
+    fn pop_with_notify(&mut self, cx: &mut Context) -> Result<T, PopError> {
+        let (t, value) = self.inner.pop_with_notify(cx)?;
         measure!("sojourn_time", t.elapsed());
         Ok(value)
     }
 
-    fn close(&self) -> Result<(), CloseError> {
+    fn close(&mut self) -> Result<(), CloseError> {
         self.inner.close()
     }
 
@@ -104,7 +113,7 @@ impl<T, Q> super::Conditional<T> for Queue<T, Q>
 where
     Q: super::Conditional<(Instant, T)>,
 {
-    fn find_pop<F: Fn(&T) -> bool>(&self, check: F) -> Result<T, PopError> {
+    fn find_pop<F: Fn(&T) -> bool>(&mut self, check: F) -> Result<T, PopError> {
         let (t, value) = self.inner.find_pop(|(_, value)| check(value))?;
         measure!("sojourn_time", t.elapsed());
         Ok(value)

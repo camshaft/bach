@@ -1,7 +1,8 @@
 use bach::{
     environment::default::Runtime,
     ext::*,
-    sync::{duplex::Duplex, queue::vec_deque},
+    queue::vec_deque,
+    sync::duplex::Duplex,
     time::{self, Duration, Instant},
 };
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -16,7 +17,7 @@ fn run(f: impl FnOnce()) -> Duration {
 type Queue<T> = vec_deque::Queue<T>;
 
 fn duplex<T: 'static + Send + Sync>() -> (Duplex<T>, Duplex<T>) {
-    <Duplex<T>>::pair(<Queue<T>>::default(), <Queue<T>>::default())
+    <Duplex<T>>::pair(<Queue<T>>::default().mutex(), <Queue<T>>::default().mutex())
 }
 
 struct AtomicDuration(AtomicU64);
@@ -41,7 +42,7 @@ fn request_response() {
     static RESPONSE_TIME: AtomicDuration = AtomicDuration::new(Duration::ZERO);
 
     run(|| {
-        let (client, server) = duplex::<&'static str>();
+        let (mut client, mut server) = duplex::<&'static str>();
 
         async move {
             client.sender.push("hello").await.unwrap();
@@ -74,12 +75,13 @@ fn latent_queue() {
     const COUNT: u64 = 10;
 
     let elapsed = run(|| {
-        let (sender, receiver) = Queue::builder()
+        let (mut sender, mut receiver) = Queue::builder()
             .with_capacity(Some(20))
             .build()
             .latent(10.ms())
             .sojourn()
             .span("channel")
+            .mutex()
             .channel();
 
         async move {
@@ -101,6 +103,6 @@ fn latent_queue() {
         .spawn_named("server");
     });
 
-    assert_eq!(elapsed, 20.ms());
     assert_eq!(RECV_COUNT.load(Ordering::Relaxed), COUNT);
+    assert_eq!(elapsed, 20.ms());
 }

@@ -46,7 +46,7 @@ pub fn current() -> Group {
     scope::try_borrow_with(|scope| scope.unwrap_or_else(|| Group::new("main")))
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Group {
     id: u64,
 }
@@ -65,6 +65,10 @@ impl Group {
 
             Self { id }
         })
+    }
+
+    pub fn id(&self) -> u64 {
+        self.id
     }
 
     pub fn name(&self) -> String {
@@ -112,6 +116,7 @@ where
         let inner = this.inner;
         let group = this.group;
         let span = info_span!("group", %group);
-        scope::with(*group, || span.in_scope(|| Future::poll(inner, cx)))
+        let (_, res) = scope::with(*group, || span.in_scope(|| Future::poll(inner, cx)));
+        res
     }
 }

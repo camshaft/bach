@@ -2,8 +2,9 @@ use core::time::Duration;
 
 pub use crate::{
     group::GroupExt,
+    queue::{InstantQueueExt, QueueExt},
     rand::{produce, Any, AnySliceExt, AnySliceMutExt},
-    sync::queue::{InstantQueueExt, QueueExt},
+    sync::queue::SharedExt,
 };
 
 pub trait DurationLiteral {

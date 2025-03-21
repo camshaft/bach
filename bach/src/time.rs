@@ -2,13 +2,17 @@ use core::{fmt, ops};
 
 mod bitset;
 mod entry;
+pub mod error;
 pub mod scheduler;
 mod stack;
+mod timeout;
 mod wheel;
 
 pub use core::time::Duration;
+pub use scheduler::Timer as Sleep;
+pub use timeout::*;
 
-pub fn sleep(duration: Duration) -> scheduler::Timer {
+pub fn sleep(duration: Duration) -> Sleep {
     measure!("sleep", duration);
     scheduler::scope::borrow_with(|handle| {
         let ticks = resolution::duration_to_ticks(duration);
@@ -18,7 +22,7 @@ pub fn sleep(duration: Duration) -> scheduler::Timer {
 
 pub use self::sleep as delay;
 
-pub fn sleep_until(target: Instant) -> scheduler::Timer {
+pub fn sleep_until(target: Instant) -> Sleep {
     let now = Instant::now();
     let duration = target.0.saturating_sub(now.0);
     sleep(duration)
@@ -46,6 +50,16 @@ impl Instant {
 
     pub fn has_elapsed(&self) -> bool {
         Self::now().ge(self)
+    }
+
+    pub fn saturating_duration_since(self, earlier: Instant) -> Duration {
+        self.0.saturating_sub(earlier.0)
+    }
+
+    #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) fn zero() -> Self {
+        Self(Duration::ZERO)
     }
 }
 

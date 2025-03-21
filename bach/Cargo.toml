@@ -11,7 +11,8 @@ edition = "2021"
 coop = []
 full = ["coop", "metrics", "net", "tracing"]
 metrics = ["dep:metrics"]
-net = []
+net = ["dep:bytes", "dep:s2n-quic-core", "dep:siphasher", "dep:slab", "dep:tokio"]
+tokio-compat = ["dep:tokio", "tokio/time"]
 tracing = ["dep:tracing"]
 
 [dependencies]
@@ -19,6 +20,7 @@ arr_macro = "0.2"
 async-task = { version = "4", default-features = false }
 atomic-waker = "1"
 bolero-generator.workspace = true
+bytes = { version = "1", optional = true }
 event-listener-strategy = { version = "0.5.2", default-features = false }
 futures-core = { version = "0.3", default-features = false }
 intrusive-collections = "0.9"
@@ -26,6 +28,10 @@ pin-project-lite = "0.2"
 metrics = { version = "0.24", optional = true }
 rand = { version = "0.9", default-features = false }
 rand_xoshiro = "0.7"
+s2n-quic-core = { version = "0.55", default-features = false, optional = true }
+siphasher = { version = "1", default-features = false, optional = true }
+slab = { version = "0.4", optional = true }
+tokio = { version = "1", default-features = false, optional = true }
 tracing = { version = "0.1", optional = true }
 
 [build-dependencies]
@@ -33,9 +39,13 @@ autocfg = "1"
 
 [dev-dependencies]
 bolero.workspace = true
+bytes = "1"
+pcap-parser = "0.16"
+tokio = { version = "1", default-features = false }
 
 [lints.rust.unexpected_cfgs]
 level = "warn"
 check-cfg = [
     'cfg(always_disabled)', # used to always disable something
+    'cfg(kani)'
 ]
