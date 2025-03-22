@@ -22,6 +22,7 @@ tests!(
     panics,
     queue,
     task,
+    time,
 );
 
 pub mod benches;

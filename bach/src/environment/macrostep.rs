@@ -1,7 +1,9 @@
 #[derive(Clone, Copy, Debug, Default)]
+#[non_exhaustive]
 pub struct Macrostep {
     pub tasks: usize,
     pub ticks: u64,
+    pub primary_count: u64,
 }
 
 impl Macrostep {
