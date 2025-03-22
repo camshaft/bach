@@ -1,0 +1,6 @@
+[0:00:00.000000000]: client socket: 10.0.0.1:49152
+[0:00:00.000000000]: client sent request
+[0:00:00.000000000]: server socket: 10.0.0.2:8080
+[0:00:00.050000000]: server got request
+[0:00:00.050000000]: client sent response
+[0:00:00.100000000]: client got response
