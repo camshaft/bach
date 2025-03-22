@@ -2,6 +2,7 @@
 members = [
     "bach",
     "bach-tests",
+    "bach-wasm-tests",
 ]
 resolver = "2"
 

@@ -158,6 +158,38 @@ jobs:
           # needed to read corpus files from filesystem
           MIRIFLAGS: -Zmiri-disable-isolation
 
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        id: toolchain
+        run: |
+          rustup toolchain install stable
+          rustup override set stable
+
+      - uses: camshaft/install@v1
+        with:
+          crate: wasm-pack
+
+      - uses: camshaft/rust-cache@v1
+
+      - name: Run node tests
+        working-directory: bach-wasm-tests
+        run: |
+          wasm-pack test --node
+
+      - name: Run firefox tests
+        working-directory: bach-wasm-tests
+        run: |
+          wasm-pack test --firefox --headless
+
+      - name: Run chrome tests
+        working-directory: bach-wasm-tests
+        run: |
+          wasm-pack test --chrome --headless
+
   kani:
     runs-on: ubuntu-latest
     strategy:
