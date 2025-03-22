@@ -9,6 +9,7 @@ pub use macrostep::Macrostep;
 pub trait Environment {
     fn enter<F: FnOnce() -> O, O>(&mut self, f: F) -> O;
 
+    /// This function is unused - preserving until 0.1 release
     fn run<Tasks, R>(&mut self, tasks: Tasks) -> Poll<()>
     where
         Tasks: IntoIterator<Item = R>,
@@ -22,32 +23,10 @@ pub trait Environment {
     where
         F: 'static + FnOnce() + Send,
     {
-        struct Close<F>(F);
-
-        impl<F> Runnable for Close<F>
-        where
-            F: 'static + FnOnce() + Send,
-        {
-            fn run(self) -> Poll<()> {
-                (self.0)();
-                Poll::Ready(())
-            }
-        }
-
-        let _ = self.run(Some(Close(close)));
+        self.enter(close);
     }
 }
 
 pub trait Runnable: 'static + Send {
     fn run(self) -> Poll<()>;
-}
-
-impl Runnable for async_task::Runnable {
-    fn run(self) -> Poll<()> {
-        if self.run() {
-            Poll::Pending
-        } else {
-            Poll::Ready(())
-        }
-    }
 }

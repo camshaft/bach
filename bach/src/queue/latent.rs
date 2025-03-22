@@ -94,7 +94,8 @@ where
     }
 
     fn pop(&mut self) -> Result<T, PopError> {
-        let (_t, value) = self.inner.find_pop(|(t, _)| t.has_elapsed())?;
+        let now = Instant::now();
+        let (_t, value) = self.inner.find_pop(|(t, _)| t.le(&now))?;
         Ok(value)
     }
 

@@ -12,7 +12,7 @@ use std::{collections::HashMap, io};
 
 use super::pcap;
 
-define!(scope, Registry);
+define!(scope, Box<Registry>);
 
 pub(crate) fn with_registry<F: FnOnce(&mut Registry) -> io::Result<R>, R>(f: F) -> io::Result<R> {
     scope::try_borrow_mut_with(|registry| {

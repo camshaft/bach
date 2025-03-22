@@ -11,13 +11,12 @@ edition = "2021"
 coop = []
 full = ["coop", "metrics", "net", "tracing"]
 metrics = ["dep:metrics"]
-net = ["dep:bytes", "dep:s2n-quic-core", "dep:siphasher", "dep:slab", "dep:tokio"]
+net = ["dep:bytes", "dep:s2n-quic-core", "dep:siphasher", "dep:tokio"]
 tokio-compat = ["dep:tokio", "tokio/time"]
 tracing = ["dep:tracing"]
 
 [dependencies]
 arr_macro = "0.2"
-async-task = { version = "4", default-features = false }
 atomic-waker = "1"
 bolero-generator.workspace = true
 bytes = { version = "1", optional = true }
@@ -30,7 +29,7 @@ rand = { version = "0.9", default-features = false }
 rand_xoshiro = "0.7"
 s2n-quic-core = { version = "0.55", default-features = false, optional = true }
 siphasher = { version = "1", default-features = false, optional = true }
-slab = { version = "0.4", optional = true }
+slotmap = "1"
 tokio = { version = "1", default-features = false, optional = true }
 tracing = { version = "0.1", optional = true }
 
@@ -47,5 +46,5 @@ tokio = { version = "1", default-features = false }
 level = "warn"
 check-cfg = [
     'cfg(always_disabled)', # used to always disable something
-    'cfg(kani)'
+    'cfg(kani)',
 ]

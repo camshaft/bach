@@ -1,16 +1,10 @@
+use crate::sim;
 use bach::{
-    environment::default::Runtime,
     ext::*,
-    net::{socket::SendOptions, UdpSocket},
+    net::{lookup_host, socket::SendOptions, UdpSocket},
 };
-use std::io::IoSlice;
+use std::{io::IoSlice, time::Duration};
 use tracing::info;
-
-fn sim(f: impl Fn()) {
-    crate::testing::init_tracing();
-    let mut rt = Runtime::new();
-    rt.run(&f);
-}
 
 fn udp_ping_pong() {
     info!("start");
@@ -32,7 +26,7 @@ fn udp_ping_pong() {
 
             info!("close");
         }
-        .group(&format!("client_{i}"))
+        .group(format!("client_{i}"))
         .primary()
         .spawn();
     }
@@ -60,7 +54,7 @@ fn udp_ping_pong() {
 
 #[test]
 fn udp_ping_pong_test() {
-    sim(udp_ping_pong)
+    sim(udp_ping_pong);
 }
 
 #[test]
@@ -82,7 +76,7 @@ fn multiple_sockets() {
         }
         .group("client")
         .spawn();
-    })
+    });
 }
 
 #[test]
@@ -131,5 +125,35 @@ fn gso() {
         }
         .group("server")
         .spawn();
-    })
+    });
+}
+
+#[test]
+fn udp_unidirectional() {
+    let items: u64 = if cfg!(feature = "leaks") { 500 } else { 10_000 };
+    sim(|| {
+        async move {
+            let socket = UdpSocket::bind("client:0").await.unwrap();
+            let server = lookup_host("server:1337").await.unwrap().next().unwrap();
+            for i in 0..items {
+                socket.send_to(&i.to_be_bytes(), server).await.unwrap();
+                // pace packets so there's no loss
+                bach::time::sleep(Duration::from_millis(1)).await;
+            }
+        }
+        .primary()
+        .group("client")
+        .spawn();
+
+        async move {
+            let socket = UdpSocket::bind("server:1337").await.unwrap();
+            let mut buf = items.to_be_bytes();
+            for _i in 0..items {
+                socket.recv_from(&mut buf).await.unwrap();
+            }
+        }
+        .primary()
+        .group("server")
+        .spawn();
+    });
 }

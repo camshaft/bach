@@ -1,4 +1,4 @@
-use crate::executor::{Handle, JoinHandle};
+use crate::executor::Handle;
 use core::{
     future::{poll_fn, Future},
     task::Poll,
@@ -6,7 +6,12 @@ use core::{
 
 crate::scope::define!(scope, Handle);
 
+mod join;
+pub(crate) mod spawn;
+pub(crate) mod supervisor;
 pub(crate) mod waker;
+
+pub use join::{JoinError, JoinHandle};
 
 pub fn spawn<F, T>(future: F) -> JoinHandle<T>
 where
