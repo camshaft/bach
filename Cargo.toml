@@ -1,11 +1,13 @@
 [workspace]
 members = [
     "bach",
+    "bach-js",
     "bach-tests",
 ]
 resolver = "2"
 
 [workspace.dependencies]
+bach = { version = "0.0.11", path = "./bach" }
 bolero-generator = { version = "0.13", features = ["any"] }
 bolero = { version = "0.13" }
 

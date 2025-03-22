@@ -121,6 +121,10 @@ impl<E: Environment> Executor<E> {
         }
     }
 
+    pub fn primary_count(&self) -> u64 {
+        self.handle.primary_count()
+    }
+
     pub fn block_on_primary(&mut self) {
         loop {
             self.macrostep();

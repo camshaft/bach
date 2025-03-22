@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "noEmit": true, // Optional - see note below
+    "target": "ESNext",
+    "module": "ESNext",
+    "rewriteRelativeImportExtensions": true,
+    "verbatimModuleSyntax": true
+  }
+}

@@ -35,9 +35,17 @@ impl Runtime {
         self.with_rand(Some(rand::Scope::new(seed)))
     }
 
+    pub fn set_seed(&mut self, seed: u64) {
+        self.set_rand(rand::Scope::new(seed));
+    }
+
     pub fn with_rand(mut self, rand: Option<rand::Scope>) -> Self {
         self.inner.environment().rand = rand;
         self
+    }
+
+    pub fn set_rand(&mut self, rand: rand::Scope) {
+        self.inner.environment().rand = Some(rand);
     }
 
     pub fn with_coop(mut self, enabled: bool) -> Self {
@@ -82,6 +90,18 @@ impl Runtime {
         self.inner.block_on_primary();
 
         result
+    }
+
+    pub fn macrostep(&mut self) {
+        self.inner.macrostep();
+    }
+
+    pub fn enter<F: FnOnce() -> R, R>(&mut self, f: F) -> R {
+        self.inner.environment().enter(f)
+    }
+
+    pub fn primary_count(&self) -> u64 {
+        self.inner.primary_count()
     }
 
     pub fn block_on<F>(&mut self, f: F) -> F::Output

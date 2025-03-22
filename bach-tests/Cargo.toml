@@ -14,7 +14,7 @@ net = ["bach/net"]
 tracing = ["bach/tracing"]
 
 [dependencies]
-bach = { path = "../bach" }
+bach.workspace = true
 bolero.workspace = true
 checkers = { version = "0.6", features = ["backtrace"], optional = true }
 criterion = { version = "0.5", features = ["html_reports"] }
