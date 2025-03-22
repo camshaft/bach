@@ -50,13 +50,7 @@ new_key_type! {
 
 type Tasks = SlotMap<TaskId, Slot>;
 
-pub struct Closer(Inner);
-
-impl Drop for Closer {
-    fn drop(&mut self) {
-        let _ = self.0.microstep();
-    }
-}
+pub struct Closer(#[allow(dead_code)] Inner);
 
 pub struct Supervisor(Inner);
 
@@ -96,8 +90,8 @@ impl Supervisor {
         self.0.events.clone()
     }
 
-    pub fn microstep(&mut self) -> usize {
-        self.0.microstep()
+    pub fn microstep(&mut self, current_tick: u64) -> usize {
+        self.0.microstep(current_tick)
     }
 
     pub fn close(&mut self) -> Closer {
@@ -118,7 +112,7 @@ struct Inner {
 }
 
 impl Inner {
-    fn microstep(&mut self) -> usize {
+    fn microstep(&mut self, current_tick: u64) -> usize {
         let mut count = 0;
         let Ok(mut guard) = self.events.lock() else {
             return count;
@@ -142,7 +136,7 @@ impl Inner {
                                 waker_state,
                                 waker,
                                 runnable,
-                                self_wakes: 0,
+                                self_wakes: Default::default(),
                             }
                         });
                         self.task_counts.fetch_add(1, Ordering::Relaxed);
@@ -153,7 +147,7 @@ impl Inner {
                         let Some(slot) = self.tasks.get_mut(task_id) else {
                             break;
                         };
-                        let res = slot.poll(&self.max_self_wakes);
+                        let res = slot.poll(current_tick, &self.max_self_wakes);
                         if res.is_ready() {
                             self.tasks.remove(task_id);
                             self.task_counts.fetch_sub(1, Ordering::Relaxed);
@@ -179,23 +173,23 @@ struct Slot {
     waker_state: Arc<waker::ForTask>,
     waker: Waker,
     runnable: DynRunnable,
-    self_wakes: usize,
+    self_wakes: SelfWakes,
 }
 
 impl Slot {
-    fn poll(&mut self, max_self_wakes: &Option<usize>) -> Poll<()> {
+    fn poll(&mut self, current_tick: u64, max_self_wakes: &Option<usize>) -> Poll<()> {
         let cx = &mut Context::from_waker(&self.waker);
         let res = self.runnable.as_mut().poll(cx);
 
         // check that the task contract is enforced
         if res.is_pending() {
-            self.check_status(max_self_wakes);
+            self.check_status(current_tick, max_self_wakes);
         }
 
         res
     }
 
-    fn check_status(&mut self, max_self_wakes: &Option<usize>) {
+    fn check_status(&mut self, current_tick: u64, max_self_wakes: &Option<usize>) {
         let status = self.waker_state.status();
 
         if status.is_zombie() {
@@ -210,22 +204,51 @@ impl Slot {
         }
 
         if status.in_run_queue {
-            self.self_wakes += 1;
-            if let Some(max) = *max_self_wakes {
-                if self.self_wakes > max {
-                    let type_name = self.runnable.as_ref().type_name();
-                    panic!(
-                        "\nTask contract violation.\n\nFuture: {type_name}\n\n{}{}{}",
-                        "The task has been self-woken more than `max_self_wakes` (",
-                        max,
-                        ") times. This is likely a bug in the application's task implementation.\n"
-                    );
-                }
+            if !self.self_wakes.can_self_wake(current_tick, max_self_wakes) {
+                let type_name = self.runnable.as_ref().type_name();
+                panic!(
+                    "\nTask contract violation.\n\nFuture: {type_name}\n\n{}{}{}",
+                    "The task has been self-woken more than `max_self_wakes` (",
+                    max_self_wakes.unwrap(),
+                    ") times. This is likely a bug in the application's task implementation.\n"
+                );
             }
         } else {
-            self.self_wakes = 0;
+            self.self_wakes.reset(current_tick);
         }
 
         self.waker_state.after_poll();
+    }
+}
+
+#[derive(Debug, Default)]
+struct SelfWakes {
+    count: usize,
+    last_update: u64,
+}
+
+impl SelfWakes {
+    fn can_self_wake(&mut self, current_tick: u64, max: &Option<usize>) -> bool {
+        if self.last_update < current_tick {
+            self.reset(current_tick);
+            return true;
+        }
+
+        self.count += 1;
+
+        let Some(max) = *max else {
+            return true;
+        };
+
+        if self.count <= max {
+            return true;
+        }
+
+        false
+    }
+
+    fn reset(&mut self, current_tick: u64) {
+        self.count = 0;
+        self.last_update = current_tick;
     }
 }

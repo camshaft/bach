@@ -58,49 +58,75 @@ impl<E: Environment> Executor<E> {
     }
 
     pub fn microstep(&mut self) -> usize {
-        self.supervisor.microstep()
+        self.environment.enter(|| {
+            let ticks = crate::time::scheduler::ticks();
+            self.supervisor.microstep(ticks)
+        })
     }
 
     pub fn macrostep(&mut self) -> Macrostep {
+        self.macrostep_inner(false)
+    }
+
+    fn macrostep_inner(&mut self, stop_at_zero_primary: bool) -> Macrostep {
         let mut total = 0;
         let mut steps = 0;
-        loop {
-            let tasks = self.environment.enter(|| self.supervisor.microstep());
 
-            // loop until all of the tasks have settled
-            if tasks != 0 {
+        let mut is_ok = true;
+
+        self.environment.enter(|| {
+            loop {
+                let ticks = crate::time::scheduler::ticks();
+                let tasks = self.supervisor.microstep(ticks);
+
+                // all of the pending tasks have settled
+                if tasks == 0 {
+                    break;
+                }
+
                 total += tasks;
                 steps += 1;
 
+                // check if we're still in bounds
                 if let Some(max) = self.max_microsteps {
                     if steps > max {
-                        panic!(
-                            "\nTask contract violation.\n\n{}{}{}",
-                            "The runtime has exceeded the configured `max_microsteps` limit of ",
-                            max,
-                            concat!(
-                                ". This is likely due to a bug in the application that prevents time ",
-                                "moving forward by continually waking tasks. Enable the `tracing` and ",
-                                "`metrics` feature in `bach` to identify which ",
-                                "task(s) are causing this issue."
-                            )
-                        );
+                        is_ok = false;
+                        break;
                     }
                 }
-
-                continue;
             }
+        });
 
-            let macrostep = Macrostep {
-                tasks: total,
-                ticks: 0,
-            };
-            let macrostep = self.environment.on_macrostep(macrostep);
+        if !is_ok {
+            panic!(
+                "\nTask contract violation.\n\n{}{}{}",
+                "The runtime has exceeded the configured `max_microsteps` limit of ",
+                self.max_microsteps.unwrap(),
+                concat!(
+                    ". This is likely due to a bug in the application that prevents time ",
+                    "moving forward by continually waking tasks. Enable the `tracing` and ",
+                    "`metrics` feature in `bach` to identify which ",
+                    "task(s) are causing this issue."
+                )
+            );
+        }
 
-            self.environment.enter(|| macrostep.metrics());
+        let macrostep = Macrostep {
+            tasks: total,
+            ticks: 0,
+            primary_count: self.handle.primary_count(),
+        };
 
+        if stop_at_zero_primary && macrostep.primary_count == 0 {
             return macrostep;
         }
+
+        let macrostep = self.environment.on_macrostep(macrostep);
+
+        #[cfg(feature = "metrics")]
+        self.environment.enter(|| macrostep.metrics());
+
+        macrostep
     }
 
     pub fn block_on<T, Output>(&mut self, task: T) -> Output
@@ -123,9 +149,11 @@ impl<E: Environment> Executor<E> {
 
     pub fn block_on_primary(&mut self) {
         loop {
-            self.macrostep();
+            // Don't call `on_macrostep` once `primary` hit `0`. This avoids incrementing
+            // the clock to a non-primary time.
+            let result = self.macrostep_inner(true);
 
-            if self.handle.primary_count() == 0 {
+            if result.primary_count == 0 {
                 return;
             }
         }
@@ -219,91 +247,4 @@ pub struct Snapshot {
     pub primary_count: u64,
     pub tasks: u64,
     pub groups: Vec<crate::group::Group>,
-}
-
-#[cfg(test)]
-pub(crate) mod tests {
-    use super::*;
-
-    pub fn executor() -> Executor<Env> {
-        Executor::new(|_| Env)
-    }
-
-    #[derive(Default)]
-    pub struct Env;
-
-    impl super::Environment for Env {
-        fn enter<F: FnOnce() -> O, O>(&mut self, f: F) -> O {
-            f()
-        }
-
-        fn run<T, R>(&mut self, _tasks: T) -> Poll<()>
-        where
-            T: IntoIterator<Item = R>,
-            R: crate::environment::Runnable,
-        {
-            unimplemented!()
-        }
-    }
-
-    #[derive(Default)]
-    struct Yield(bool);
-
-    impl Future for Yield {
-        type Output = ();
-
-        fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-            if core::mem::replace(&mut self.0, true) {
-                Poll::Ready(())
-            } else {
-                cx.waker().wake_by_ref();
-                Poll::Pending
-            }
-        }
-    }
-
-    /*
-    #[test]
-    fn basic_test() {
-        let mut executor = executor();
-
-        let queue = Arc::new(queue::vec_deque::Queue::default().mutex());
-
-        crate::task::scope::with(executor.handle().clone(), || {
-            use crate::task::spawn;
-
-            let s1 = queue.clone();
-            spawn(async move {
-                Yield::default().await;
-                let _ = s1.push_lazy(&mut Some("hello"));
-                Yield::default().await;
-            });
-
-            let s2 = queue.clone();
-            let exclaimation = async move {
-                Yield::default().await;
-                let _ = s2.push_lazy(&mut Some("!!!!!"));
-                Yield::default().await;
-            };
-
-            let s3 = queue.clone();
-            spawn(async move {
-                Yield::default().await;
-                let _ = s3.push_lazy(&mut Some("world"));
-                Yield::default().await;
-                exclaimation.await;
-                Yield::default().await;
-            });
-        });
-
-        executor.macrostep();
-
-        let mut output = String::new();
-        for chunk in queue.lock().unwrap().drain() {
-            output.push_str(chunk);
-        }
-
-        assert_eq!(output, "helloworld!!!!!");
-    }
-    */
 }

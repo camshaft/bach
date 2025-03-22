@@ -171,7 +171,14 @@ impl Environment {
         };
 
         self.handle.enter(|| {
-            self.time.close();
+            // Don't close the time scheduler - that will wake all of its tasks which we don't want.
+            // Some of them may be monitoring for a timeout.
+            // ```
+            // async {
+            //    sleep(Duration::from_secs(10)).await;
+            //    panic!("simulation time exceede 10s");
+            // }.spawn();
+            // ```
             self.time.enter(f)
         })
     }

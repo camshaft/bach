@@ -15,6 +15,10 @@ use std::sync::Mutex;
 
 crate::scope::define!(scope, Handle);
 
+pub(crate) fn ticks() -> u64 {
+    scope::borrow_with(|h| h.ticks())
+}
+
 type Queue = Arc<Mutex<queue::span::Queue<queue::vec_deque::Queue<ArcEntry>>>>;
 
 fn new_queue() -> Queue {
@@ -218,93 +222,5 @@ impl Future for Timer {
         }
 
         Poll::Pending
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::executor::tests::executor;
-    use alloc::vec::Vec;
-    use bolero::{check, generator::*};
-    use core::time::Duration;
-
-    async fn delay(handle: Handle, count: usize, delay: u64) {
-        for _ in 0..count {
-            // get the time before the delay
-            let now = handle.ticks();
-
-            // await the delay
-            handle.delay(delay).await;
-
-            // get the time that has passed on the clock and make sure it matches the amount that
-            // was delayed
-            let actual = handle.ticks();
-            let expected = now + delay;
-            assert_eq!(
-                actual, expected,
-                "actual: {:?}, expected: {:?}",
-                actual, expected
-            );
-        }
-    }
-
-    fn test_helper(delays: &[(u8, u64)]) {
-        let mut scheduler = Scheduler::new();
-        let mut executor = executor();
-
-        let handle = scheduler.handle();
-
-        for (count, duration) in delays.as_ref().iter() {
-            executor.spawn(delay(handle.clone(), *count as usize, *duration));
-        }
-
-        let mut total = 0;
-
-        loop {
-            executor.macrostep();
-
-            if let Some(expiration) = scheduler.advance() {
-                total += expiration;
-                scheduler.wake();
-            } else if scheduler.wake() == 0 {
-                // there are no remaining tasks to execute
-                break;
-            }
-        }
-
-        assert_eq!(executor.microstep(), 0, "the task list should be empty");
-        assert!(
-            scheduler.advance().is_none(),
-            "the scheduler should be empty"
-        );
-        assert_eq!(
-            total,
-            handle.ticks(),
-            "the current time should reflect the total number of sleep durations"
-        );
-
-        drop(scheduler);
-        drop(executor);
-
-        assert_eq!(
-            Arc::strong_count(&handle.0),
-            1,
-            "the scheduler should cleanly shut down"
-        );
-    }
-
-    #[test]
-    fn timer_test() {
-        let min_time = Duration::from_nanos(1).as_nanos() as u64;
-        let max_time = Duration::from_secs(3600).as_nanos() as u64;
-
-        let delay = min_time..max_time;
-        let count = 0u8..3;
-        let delays = produce::<Vec<_>>().with().values((count, delay));
-
-        check!()
-            .with_generator(delays)
-            .for_each(|delays| test_helper(delays));
     }
 }

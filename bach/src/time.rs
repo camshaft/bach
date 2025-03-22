@@ -100,7 +100,7 @@ pub(crate) mod resolution {
     crate::scope::define!(scope, Duration);
 
     pub fn tick_duration() -> Duration {
-        scope::try_borrow_with(|v| v.unwrap_or_else(|| Duration::from_micros(1)))
+        scope::try_borrow_with(|v| v.unwrap_or_else(|| Duration::from_nanos(1)))
     }
 
     pub use scope::with as with_tick_duration;
