@@ -77,7 +77,7 @@ pub trait Conditional<T>: Queue<T> {
     fn find_pop<F: Fn(&T) -> bool>(&mut self, check: F) -> Result<T, PopError>;
 }
 
-pub trait QueueExt<T>: 'static + Queue<T> + Sized + Send + Sync {
+pub trait QueueExt<T>: 'static + Queue<T> + Sized + Send {
     #[inline]
     fn span<N: Into<alloc::borrow::Cow<'static, str>>>(self, name: N) -> span::Queue<Self> {
         span::Queue::new(self, name)
@@ -89,9 +89,9 @@ pub trait QueueExt<T>: 'static + Queue<T> + Sized + Send + Sync {
     }
 }
 
-impl<Q, T> QueueExt<T> for Q where Q: 'static + Queue<T> + Sized + Send + Sync {}
+impl<Q, T> QueueExt<T> for Q where Q: 'static + Queue<T> + Sized + Send {}
 
-pub trait InstantQueueExt<T>: 'static + Queue<(Instant, T)> + Sized + Send + Sync {
+pub trait InstantQueueExt<T>: 'static + Queue<(Instant, T)> + Sized + Send {
     #[inline]
     fn sojourn(self) -> sojourn::Queue<T, Self> {
         sojourn::Queue::new(self)
@@ -107,7 +107,7 @@ pub trait InstantQueueExt<T>: 'static + Queue<(Instant, T)> + Sized + Send + Syn
     }
 }
 
-impl<Q, T> InstantQueueExt<T> for Q where Q: 'static + Queue<(Instant, T)> + Sized + Send + Sync {}
+impl<Q, T> InstantQueueExt<T> for Q where Q: 'static + Queue<(Instant, T)> + Sized + Send {}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum PushError {

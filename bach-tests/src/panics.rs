@@ -1,12 +1,5 @@
-use bach::{environment::default::Runtime, ext::*};
-
-fn sim(f: impl Fn()) -> impl Fn() {
-    crate::testing::init_tracing();
-    move || {
-        let mut rt = Runtime::new().with_rand(Some(bach::rand::Scope::new(123)));
-        rt.run(&f);
-    }
-}
+use crate::sim;
+use bach::ext::*;
 
 /// Ensures that a task that panics doesn't cause the simulation to double panic
 #[test]
@@ -18,5 +11,5 @@ fn task_panic() {
         }
         .primary()
         .spawn();
-    })();
+    });
 }

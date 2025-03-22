@@ -1,11 +1,15 @@
 use crate::net::SocketAddr;
 use siphasher::sip::SipHasher13;
-use slab::Slab;
+use slotmap::{new_key_type, SlotMap};
 use std::collections::VecDeque;
 
+new_key_type! {
+   pub struct SenderId;
+}
+
 pub struct Map<V> {
-    inner: Slab<V>,
-    active: VecDeque<usize>,
+    inner: SlotMap<SenderId, V>,
+    active: VecDeque<SenderId>,
     hasher: Hasher,
 }
 
@@ -36,13 +40,13 @@ where
         self.inner[id].clone()
     }
 
-    pub(super) fn reserve(&mut self, sender: V) -> usize {
+    pub(super) fn reserve(&mut self, sender: V) -> SenderId {
         let id = self.inner.insert(sender);
         self.active.push_back(id);
         id
     }
 
-    pub(super) fn remove(&mut self, id: usize) -> bool {
+    pub(super) fn remove(&mut self, id: SenderId) -> bool {
         self.inner.remove(id);
         self.active.retain(|v| *v != id);
         self.active.is_empty()

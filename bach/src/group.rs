@@ -39,6 +39,17 @@ impl Groups {
     }
 }
 
+pub(crate) fn list() -> Vec<Group> {
+    GROUPS.with(|groups| {
+        let groups = groups.borrow();
+        groups
+            .id_to_name
+            .keys()
+            .map(|id| Group { id: *id })
+            .collect()
+    })
+}
+
 crate::scope::define!(scope, Group);
 crate::scope::define!(listener, fn(u64, &str));
 
@@ -46,9 +57,25 @@ pub fn current() -> Group {
     scope::try_borrow_with(|scope| scope.unwrap_or_else(|| Group::new("main")))
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Group {
     id: u64,
+}
+
+impl fmt::Debug for Group {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut f = f.debug_struct("Group");
+        f.field("id", &self.id);
+
+        GROUPS.with(|groups| {
+            let groups = groups.borrow();
+            if let Some(name) = groups.id_to_name.get(&self.id) {
+                f.field("name", name);
+            }
+        });
+
+        f.finish()
+    }
 }
 
 impl fmt::Display for Group {
@@ -77,15 +104,15 @@ impl Group {
 }
 
 pub trait GroupExt: Sized {
-    fn group(self, name: &str) -> Grouped<Self>;
+    fn group<N: AsRef<str>>(self, name: N) -> Grouped<Self>;
 }
 
 impl<T> GroupExt for T
 where
     T: Future,
 {
-    fn group(self, name: &str) -> Grouped<Self> {
-        let group = Group::new(name);
+    fn group<N: AsRef<str>>(self, name: N) -> Grouped<Self> {
+        let group = Group::new(name.as_ref());
         Grouped::new(self, group)
     }
 }

@@ -44,6 +44,11 @@ impl Instant {
         Self::now().0 - self.0
     }
 
+    pub fn try_elapsed(self) -> Option<Duration> {
+        let now = Self::try_now()?;
+        Some(now.0 - self.0)
+    }
+
     pub fn elapsed_since_start(self) -> Duration {
         self.0
     }
