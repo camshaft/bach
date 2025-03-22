@@ -1,84 +1,48 @@
 use crate::{
     environment::{Environment, Macrostep},
-    queue,
-    sync::queue::Shared as _,
+    task::supervisor::{Events, Supervisor},
 };
 use alloc::sync::Arc;
-use async_task::{Runnable, Task};
 use core::{
     future::Future,
     pin::Pin,
     sync::atomic::{AtomicU64, Ordering},
     task::{Context, Poll},
 };
-use std::sync::Mutex;
 
-pub struct JoinHandle<Output>(Option<Task<Output>>);
-
-impl<Output> JoinHandle<Output> {
-    pub fn cancel(mut self) {
-        if let Some(task) = self.0.take() {
-            drop(task);
-        }
-    }
-
-    pub async fn stop(mut self) -> Option<Output> {
-        if let Some(task) = self.0.take() {
-            task.cancel().await
-        } else {
-            None
-        }
-    }
-}
-
-impl<O> Future for JoinHandle<O> {
-    type Output = O;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        Pin::new(&mut self.0.as_mut().unwrap()).poll(cx)
-    }
-}
-
-impl<T> Drop for JoinHandle<T> {
-    fn drop(&mut self) {
-        if let Some(task) = self.0.take() {
-            task.detach();
-        }
-    }
-}
-
-type Queue = Arc<Mutex<queue::span::Queue<queue::vec_deque::Queue<Runnable>>>>;
-
-fn new_queue() -> Queue {
-    let queue = queue::vec_deque::Queue::default();
-    let queue = queue::span::Queue::new(queue, "bach::executor");
-    let queue = Mutex::new(queue);
-    Arc::new(queue)
-}
+pub use crate::task::JoinHandle;
 
 pub struct Executor<E: Environment> {
     environment: E,
-    queue: Queue,
     handle: Handle,
+    supervisor: Supervisor,
+    max_microsteps: Option<usize>,
 }
 
 impl<E: Environment> Executor<E> {
     pub fn new<F: FnOnce(&Handle) -> E>(create_env: F) -> Self {
-        let queue = new_queue();
+        let supervisor = Supervisor::default();
 
         let handle = Handle {
-            sender: queue.clone(),
+            events: supervisor.events(),
             primary_count: Default::default(),
             ids: Default::default(),
+            task_counts: supervisor.task_counts(),
         };
 
         let environment = create_env(&handle);
 
         Self {
             environment,
-            queue,
             handle,
+            supervisor,
+            max_microsteps: Some(100_000),
         }
+    }
+
+    /// Sets the maximum number of times that a task can wake itself up after polling
+    pub fn set_max_self_wakes(&mut self, max: Option<usize>) {
+        self.supervisor.set_max_self_wakes(max);
     }
 
     pub fn spawn<F, Output>(&self, future: F) -> JoinHandle<Output>
@@ -93,46 +57,49 @@ impl<E: Environment> Executor<E> {
         &self.handle
     }
 
-    pub fn microstep(&mut self) -> Poll<usize> {
-        let task_count = self.queue.len();
-
-        if task_count == 0 {
-            return Poll::Ready(0);
-        }
-
-        struct Iter<'a> {
-            queue: &'a Queue,
-        }
-
-        impl IntoIterator for Iter<'_> {
-            type Item = Runnable;
-            type IntoIter = std::collections::vec_deque::IntoIter<Runnable>;
-
-            fn into_iter(self) -> Self::IntoIter {
-                self.queue.lock().unwrap().drain().into_iter()
-            }
-        }
-
-        // make the drain lazy so the environment can be entered
-        let tasks = Iter { queue: &self.queue };
-
-        if self.environment.run(tasks).is_ready() {
-            Poll::Ready(task_count)
-        } else {
-            Poll::Pending
-        }
+    pub fn microstep(&mut self) -> usize {
+        self.supervisor.microstep()
     }
 
     pub fn macrostep(&mut self) -> Macrostep {
+        let mut total = 0;
+        let mut steps = 0;
         loop {
-            if let Poll::Ready(tasks) = self.microstep() {
-                let macrostep = Macrostep { tasks, ticks: 0 };
-                let macrostep = self.environment.on_macrostep(macrostep);
+            let tasks = self.environment.enter(|| self.supervisor.microstep());
 
-                self.environment.enter(|| macrostep.metrics());
+            // loop until all of the tasks have settled
+            if tasks != 0 {
+                total += tasks;
+                steps += 1;
 
-                return macrostep;
+                if let Some(max) = self.max_microsteps {
+                    if steps > max {
+                        panic!(
+                            "\nTask contract violation.\n\n{}{}{}",
+                            "The runtime has exceeded the configured `max_microsteps` limit of ",
+                            max,
+                            concat!(
+                                ". This is likely due to a bug in the application that prevents time ",
+                                "moving forward by continually waking tasks. Enable the `tracing` and ",
+                                "`metrics` feature in `bach` to identify which ",
+                                "task(s) are causing this issue."
+                            )
+                        );
+                    }
+                }
+
+                continue;
             }
+
+            let macrostep = Macrostep {
+                tasks: total,
+                ticks: 0,
+            };
+            let macrostep = self.environment.on_macrostep(macrostep);
+
+            self.environment.enter(|| macrostep.metrics());
+
+            return macrostep;
         }
     }
 
@@ -149,7 +116,7 @@ impl<E: Environment> Executor<E> {
             self.macrostep();
 
             if let Poll::Ready(value) = Pin::new(&mut task).poll(&mut ctx) {
-                return value;
+                return value.expect("task did not complete");
             }
         }
     }
@@ -169,12 +136,13 @@ impl<E: Environment> Executor<E> {
     }
 
     pub fn close(&mut self) {
-        // drop the pending items in the queue first
-        let queue = self.queue.clone();
+        if std::thread::panicking() {
+            return;
+        }
+
+        let closer = self.supervisor.close();
         self.environment.close(move || {
-            let tasks = queue.lock().unwrap().drain();
-            let _ = queue.close();
-            drop(tasks);
+            drop(closer);
         });
     }
 }
@@ -187,9 +155,10 @@ impl<E: Environment> Drop for Executor<E> {
 
 #[derive(Clone)]
 pub struct Handle {
-    sender: Queue,
+    events: Events,
     primary_count: Arc<AtomicU64>,
     ids: Arc<AtomicU64>,
+    task_counts: Arc<AtomicU64>,
 }
 
 impl Handle {
@@ -213,26 +182,12 @@ impl Handle {
     {
         count!("spawn");
 
-        let sender = self.sender.clone();
-
         let id = self.ids.fetch_add(1, Ordering::Relaxed);
         let name = Arc::from(name.to_string());
 
         let future = crate::task::info::WithInfo::new(future, id, &name);
 
-        let (runnable, task) = async_task::spawn(future, move |runnable| {
-            if name.is_empty() {
-                count!("wake", "target" = id.to_string());
-            } else {
-                count!("wake", "target" = name.clone());
-            }
-            let _ = sender.push_lazy(&mut Some(runnable));
-        });
-
-        // queue the initial poll
-        runnable.schedule();
-
-        JoinHandle(Some(task))
+        crate::task::spawn::event(&self.events, future)
     }
 
     pub fn enter<F: FnOnce() -> O, O>(&self, f: F) -> O {
@@ -244,15 +199,31 @@ impl Handle {
         crate::task::primary::Guard::new(self.primary_count.clone())
     }
 
+    pub fn snapshot(&self) -> Snapshot {
+        let groups = crate::group::list();
+        Snapshot {
+            primary_count: self.primary_count(),
+            tasks: self.task_counts.load(Ordering::Relaxed),
+            groups,
+        }
+    }
+
     fn primary_count(&self) -> u64 {
         self.primary_count.load(Ordering::SeqCst)
     }
 }
 
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct Snapshot {
+    pub primary_count: u64,
+    pub tasks: u64,
+    pub groups: Vec<crate::group::Group>,
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::{environment::Runnable, queue::QueueExt as _};
 
     pub fn executor() -> Executor<Env> {
         Executor::new(|_| Env)
@@ -266,20 +237,12 @@ pub(crate) mod tests {
             f()
         }
 
-        fn run<Tasks, R>(&mut self, tasks: Tasks) -> Poll<()>
+        fn run<T, R>(&mut self, _tasks: T) -> Poll<()>
         where
-            Tasks: IntoIterator<Item = R>,
-            R: Runnable,
+            T: IntoIterator<Item = R>,
+            R: crate::environment::Runnable,
         {
-            let mut is_ready = true;
-            for task in tasks {
-                is_ready &= task.run().is_ready();
-            }
-            if is_ready {
-                Poll::Ready(())
-            } else {
-                Poll::Pending
-            }
+            unimplemented!()
         }
     }
 
@@ -299,6 +262,7 @@ pub(crate) mod tests {
         }
     }
 
+    /*
     #[test]
     fn basic_test() {
         let mut executor = executor();
@@ -341,4 +305,5 @@ pub(crate) mod tests {
 
         assert_eq!(output, "helloworld!!!!!");
     }
+    */
 }

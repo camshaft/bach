@@ -1,11 +1,9 @@
+use super::Macrostep;
 use crate::{coop::Coop, environment::Environment as _, executor, rand, time::scheduler};
-use core::task::Poll;
-use std::time::Duration;
+use std::{task::Poll, time::Duration};
 
 #[cfg(feature = "net")]
 use crate::environment::net;
-
-use super::{Macrostep, Runnable};
 
 pub struct Runtime {
     inner: executor::Executor<Environment>,
@@ -54,7 +52,7 @@ impl Runtime {
             if let Some(net) = net.as_mut() {
                 net.set_queue(queue);
             } else {
-                *net = Some(net::registry::Registry::new(queue));
+                *net = Some(Box::new(net::registry::Registry::new(queue)));
             };
         } else {
             self.inner.environment().net = None;
@@ -116,26 +114,65 @@ pub struct Environment {
     coop: Coop,
     coop_enabled: bool,
     #[cfg(feature = "net")]
-    net: Option<net::registry::Registry>,
+    net: Option<Box<net::registry::Registry>>,
 }
 
 impl Environment {
     fn close<F: FnOnce()>(&mut self, f: F) {
-        let handle = &mut self.handle;
-        let time = &mut self.time;
-        handle.enter(|| {
-            let e = || {
-                time.close();
-                time.enter(|| {
-                    f();
-                });
-            };
-
-            if let Some(rand) = self.rand.as_mut() {
-                rand.enter(e)
-            } else {
-                e()
+        let f = {
+            #[cfg(not(feature = "coop"))]
+            {
+                f
             }
+
+            #[cfg(feature = "coop")]
+            {
+                let enabled = self.coop_enabled;
+                let coop = &mut self.coop;
+                move || {
+                    if enabled {
+                        coop.enter(f)
+                    } else {
+                        f()
+                    }
+                }
+            }
+        };
+
+        let f = {
+            #[cfg(not(feature = "net"))]
+            {
+                f
+            }
+
+            #[cfg(feature = "net")]
+            {
+                let net = &mut self.net;
+                move || {
+                    if let Some(v) = net.take() {
+                        // TODO close registry
+                        let (v, res) = net::registry::scope::with(v, f);
+                        drop(v);
+                        res
+                    } else {
+                        f()
+                    }
+                }
+            }
+        };
+
+        let rand = self.rand.as_mut();
+        let f = move || {
+            if let Some(rand) = rand {
+                rand.enter(f)
+            } else {
+                f()
+            }
+        };
+
+        self.handle.enter(|| {
+            self.time.close();
+            self.time.enter(f)
         })
     }
 }
@@ -195,10 +232,10 @@ impl super::Environment for Environment {
         self.handle.enter(|| self.time.enter(f))
     }
 
-    fn run<Tasks, R>(&mut self, tasks: Tasks) -> Poll<()>
+    fn run<T, R>(&mut self, tasks: T) -> Poll<()>
     where
-        Tasks: IntoIterator<Item = R>,
-        R: Runnable,
+        T: IntoIterator<Item = R>,
+        R: super::Runnable,
     {
         let mut is_ready = true;
 
@@ -253,7 +290,8 @@ impl super::Environment for Environment {
         // enough number that we won't get false positives but low enough that the number of
         // loops stays within reasonable ranges.
         if self.stalled_iterations > 100 {
-            panic!("the runtime stalled after 100 iterations");
+            let snapshot = self.handle.snapshot();
+            panic!("the runtime stalled after 100 iterations.\n\n{snapshot:#?}\n");
         }
 
         while let Some(ticks) = self.time.advance() {

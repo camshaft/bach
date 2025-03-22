@@ -11,6 +11,7 @@ use crate::{
 };
 use alloc::sync::Arc;
 use core::{fmt, time::Duration};
+use sender::SenderId;
 use std::{
     collections::{hash_map::Entry, HashMap},
     sync::Mutex,
@@ -62,7 +63,7 @@ impl Dispatch {
 
 pub struct Reservation {
     addr: SocketAddr,
-    id: usize,
+    id: SenderId,
     dispatch: Dispatch,
 }
 
@@ -120,7 +121,7 @@ impl Default for Fixed {
         Self {
             tx_packet_limit: Some(4096),
             rx_packet_limit: Some(4096),
-            inflight_limit: Some(4096),
+            inflight_limit: Some(u16::MAX as _),
             net_latency: Duration::from_millis(50),
         }
     }

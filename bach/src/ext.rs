@@ -58,7 +58,7 @@ where
     F: 'static + Send + core::future::Future,
     F::Output: Send,
 {
-    type Output = crate::executor::JoinHandle<F::Output>;
+    type Output = crate::task::JoinHandle<F::Output>;
 
     fn spawn(self) -> Self::Output {
         crate::task::spawn(self)

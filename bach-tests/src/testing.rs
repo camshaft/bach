@@ -1,4 +1,8 @@
 pub fn init_tracing() {
+    if !cfg!(test) || cfg!(feature = "leaks") {
+        return;
+    }
+
     use std::sync::Once;
 
     static TRACING: Once = Once::new();

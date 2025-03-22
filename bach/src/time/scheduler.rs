@@ -273,10 +273,7 @@ mod tests {
             }
         }
 
-        assert!(
-            executor.microstep().is_ready(),
-            "the task list should be empty"
-        );
+        assert_eq!(executor.microstep(), 0, "the task list should be empty");
         assert!(
             scheduler.advance().is_none(),
             "the scheduler should be empty"

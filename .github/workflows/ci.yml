@@ -108,6 +108,9 @@ jobs:
           - rust: stable
             os: ubuntu-latest
             features: default,metrics
+          - rust: stable
+            os: ubuntu-latest
+            features: default,leaks
     steps:
       - uses: actions/checkout@v4
         with:
