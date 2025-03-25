@@ -7,13 +7,11 @@ pub mod net;
 pub use macrostep::Macrostep;
 
 pub trait Environment {
-    fn enter<F: FnOnce() -> O, O>(&mut self, f: F) -> O;
+    fn enter<F: FnOnce(u64) -> O, O>(&mut self, f: F) -> O;
 
-    /// This function is unused - preserving until 0.1 release
-    fn run<Tasks, R>(&mut self, tasks: Tasks) -> Poll<()>
-    where
-        Tasks: IntoIterator<Item = R>,
-        R: Runnable;
+    fn on_microsteps<F: FnMut(u64) -> usize>(&mut self, mut f: F) {
+        self.enter(|current_ticks| while f(current_ticks) > 0 {})
+    }
 
     fn on_macrostep(&mut self, macrostep: Macrostep) -> Macrostep {
         macrostep
@@ -23,7 +21,7 @@ pub trait Environment {
     where
         F: 'static + FnOnce() + Send,
     {
-        self.enter(close);
+        self.enter(|_| close());
     }
 }
 

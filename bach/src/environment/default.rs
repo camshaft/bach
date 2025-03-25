@@ -1,6 +1,6 @@
 use super::Macrostep;
 use crate::{coop::Coop, environment::Environment as _, executor, rand, time::scheduler};
-use std::{task::Poll, time::Duration};
+use std::time::Duration;
 
 #[cfg(feature = "net")]
 use crate::environment::net;
@@ -77,7 +77,7 @@ impl Runtime {
     }
 
     pub fn run<F: FnOnce() -> R, R>(&mut self, f: F) -> R {
-        let result = self.inner.environment().enter(f);
+        let result = self.inner.environment().enter(|_| f());
 
         self.inner.block_on_primary();
 
@@ -96,7 +96,7 @@ impl Runtime {
         self.inner
             .environment()
             .time
-            .enter(|| crate::time::Instant::now().elapsed_since_start())
+            .enter(|ticks| crate::time::Instant::from_ticks(ticks).elapsed_since_start())
     }
 }
 
@@ -179,13 +179,13 @@ impl Environment {
             //    panic!("simulation time exceede 10s");
             // }.spawn();
             // ```
-            self.time.enter(f)
+            self.time.enter(|_| f())
         })
     }
 }
 
 impl super::Environment for Environment {
-    fn enter<F: FnOnce() -> O, O>(&mut self, f: F) -> O {
+    fn enter<F: FnOnce(u64) -> O, O>(&mut self, f: F) -> O {
         let f = {
             #[cfg(not(feature = "coop"))]
             {
@@ -196,11 +196,11 @@ impl super::Environment for Environment {
             {
                 let enabled = self.coop_enabled;
                 let coop = &mut self.coop;
-                move || {
+                move |ticks| {
                     if enabled {
-                        coop.enter(f)
+                        coop.enter(|| f(ticks))
                     } else {
-                        f()
+                        f(ticks)
                     }
                 }
             }
@@ -215,48 +215,28 @@ impl super::Environment for Environment {
             #[cfg(feature = "net")]
             {
                 let net = &mut self.net;
-                move || {
+                move |ticks| {
                     if let Some(v) = net.take() {
-                        let (v, res) = net::registry::scope::with(v, f);
+                        let (v, res) = net::registry::scope::with(v, || f(ticks));
                         *net = Some(v);
                         res
                     } else {
-                        f()
+                        f(ticks)
                     }
                 }
             }
         };
 
         let rand = self.rand.as_mut();
-        let f = move || {
+        let f = move |ticks| {
             if let Some(rand) = rand {
-                rand.enter(f)
+                rand.enter(|| f(ticks))
             } else {
-                f()
+                f(ticks)
             }
         };
 
         self.handle.enter(|| self.time.enter(f))
-    }
-
-    fn run<T, R>(&mut self, tasks: T) -> Poll<()>
-    where
-        T: IntoIterator<Item = R>,
-        R: super::Runnable,
-    {
-        let mut is_ready = true;
-
-        self.enter(|| {
-            for task in tasks {
-                is_ready &= task.run().is_ready();
-            }
-        });
-
-        if is_ready {
-            Poll::Ready(())
-        } else {
-            Poll::Pending
-        }
     }
 
     fn on_macrostep(&mut self, mut macrostep: Macrostep) -> Macrostep {
@@ -270,7 +250,7 @@ impl super::Environment for Environment {
             let coop = &mut self.coop;
             let f = || coop.schedule();
 
-            let f = || {
+            let mut f = || {
                 if let Some(rand) = self.rand.as_mut() {
                     rand.enter(f)
                 } else {
@@ -278,7 +258,7 @@ impl super::Environment for Environment {
                 }
             };
 
-            let tasks = self.handle.enter(|| self.time.enter(f));
+            let tasks = self.handle.enter(|| self.time.enter(|_ticks| f()));
 
             macrostep.tasks += tasks;
 

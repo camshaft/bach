@@ -61,6 +61,11 @@ impl Instant {
         self.0.saturating_sub(earlier.0)
     }
 
+    pub(crate) fn from_ticks(ticks: u64) -> Self {
+        let duration = resolution::ticks_to_duration(ticks);
+        Self(duration)
+    }
+
     #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn zero() -> Self {
