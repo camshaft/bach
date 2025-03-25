@@ -4,7 +4,11 @@ use bach::{
     time::{sleep, Instant},
 };
 use bolero::{check, produce};
-use std::time::Duration;
+use std::{
+    task::{Context, Poll},
+    time::Duration,
+};
+use tracing::info;
 
 #[test]
 fn secondary_task() {
@@ -59,4 +63,69 @@ fn timer_test() {
             }
         });
     });
+}
+
+#[test]
+fn self_wake_pacing() {
+    sim(|| {
+        async {
+            let mut pacer = Pacer::default();
+
+            for _ in 0..100 {
+                info!("before pace");
+                pacer.pace().await;
+                info!("after pace");
+                1.ms().sleep().await;
+                info!("after sleep");
+            }
+        }
+        .primary()
+        .spawn();
+    });
+}
+
+#[derive(Default)]
+pub struct Pacer {
+    transmissions_without_yield: u8,
+    yield_window: Option<Instant>,
+}
+
+impl Pacer {
+    pub async fn pace(&mut self) {
+        core::future::poll_fn(|cx| self.poll_pacing(cx)).await
+    }
+
+    #[inline]
+    pub fn poll_pacing(&mut self, cx: &mut Context) -> Poll<()> {
+        info!(self.transmissions_without_yield, "pace");
+
+        if self.transmissions_without_yield < 5 {
+            info!("pass");
+            self.transmissions_without_yield += 1;
+            return Poll::Ready(());
+        }
+
+        // reset the counter
+        self.transmissions_without_yield = 0;
+
+        // record the time that we yielded
+        let now = Instant::now();
+        let prev_yield_window = core::mem::replace(
+            &mut self.yield_window,
+            Some(now + core::time::Duration::from_millis(1)),
+        );
+
+        // if the current time falls outside of the previous window then don't actually yield - the
+        // application isn't sending at that rate
+        if let Some(yield_window) = prev_yield_window {
+            if now > yield_window {
+                info!("underflow");
+                return Poll::Ready(());
+            }
+        }
+
+        info!("yield");
+        cx.waker().wake_by_ref();
+        Poll::Pending
+    }
 }
