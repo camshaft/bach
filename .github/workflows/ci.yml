@@ -203,3 +203,41 @@ jobs:
         uses: model-checking/kani-github-action@v1.1
         with:
           working-directory: ${{ matrix.crate }}
+
+  # run integration tests with our main consumers
+  integration:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        repo: ["aws/s2n-quic"]
+
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - uses: actions/checkout@v4.2.2
+        with:
+          repository: ${{ matrix.repo }}
+          path: "target/integration/${{ matrix.repo }}"
+
+      - name: Install toolchain
+        id: toolchain
+        run: |
+          rustup toolchain install stable
+
+      - name: Add patch
+        working-directory: target/integration/${{ matrix.repo }}
+        run: |
+          cat <<EOF >> Cargo.toml
+          [patch.crates-io]
+          bach = { path = "../../../../bach" }
+          EOF
+
+      - uses: camshaft/rust-cache@v1
+        with:
+          key: ${{ matrix.repo }}
+
+      - name: Tests
+        working-directory: target/integration/${{ matrix.repo }}
+        run: |
+          rustup override set stable
+          cargo test --workspace
