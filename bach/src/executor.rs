@@ -58,10 +58,8 @@ impl<E: Environment> Executor<E> {
     }
 
     pub fn microstep(&mut self) -> usize {
-        self.environment.enter(|| {
-            let ticks = crate::time::scheduler::ticks();
-            self.supervisor.microstep(ticks)
-        })
+        self.environment
+            .enter(|current_ticks| self.supervisor.microstep(current_ticks))
     }
 
     pub fn macrostep(&mut self) -> Macrostep {
@@ -74,28 +72,29 @@ impl<E: Environment> Executor<E> {
 
         let mut is_ok = true;
 
-        self.environment.enter(|| {
-            loop {
-                let ticks = crate::time::scheduler::ticks();
-                let tasks = self.supervisor.microstep(ticks);
+        let runner = |current_tick| {
+            let tasks = self.supervisor.microstep(current_tick);
 
-                // all of the pending tasks have settled
-                if tasks == 0 {
-                    break;
-                }
+            // all of the pending tasks have settled
+            if tasks == 0 {
+                return 0;
+            }
 
-                total += tasks;
-                steps += 1;
+            total += tasks;
+            steps += 1;
 
-                // check if we're still in bounds
-                if let Some(max) = self.max_microsteps {
-                    if steps > max {
-                        is_ok = false;
-                        break;
-                    }
+            // check if we're still in bounds
+            if let Some(max) = self.max_microsteps {
+                if steps > max {
+                    is_ok = false;
+                    return 0;
                 }
             }
-        });
+
+            tasks
+        };
+
+        self.environment.on_microsteps(runner);
 
         if !is_ok {
             panic!(
@@ -124,7 +123,7 @@ impl<E: Environment> Executor<E> {
         let macrostep = self.environment.on_macrostep(macrostep);
 
         #[cfg(feature = "metrics")]
-        self.environment.enter(|| macrostep.metrics());
+        self.environment.enter(|_| macrostep.metrics());
 
         macrostep
     }

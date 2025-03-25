@@ -184,7 +184,7 @@ impl Slot {
         let res = self.runnable.as_mut().poll(cx);
 
         // check that the task contract is enforced
-        if res.is_pending() {
+        if cfg!(debug_assertions) && res.is_pending() {
             self.check_status(current_tick, max_self_wakes);
         }
 

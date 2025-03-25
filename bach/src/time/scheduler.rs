@@ -15,7 +15,7 @@ use std::sync::Mutex;
 
 crate::scope::define!(scope, Handle);
 
-pub(crate) fn ticks() -> u64 {
+pub fn ticks() -> u64 {
     scope::borrow_with(|h| h.ticks())
 }
 
@@ -68,8 +68,10 @@ impl Scheduler {
         self.handle.clone()
     }
 
-    pub fn enter<F: FnOnce() -> O, O>(&self, f: F) -> O {
-        let (_, res) = scope::with(self.handle(), f);
+    pub fn enter<F: FnOnce(u64) -> O, O>(&self, f: F) -> O {
+        let handle = self.handle();
+        let ticks = handle.ticks();
+        let (_, res) = scope::with(handle, || f(ticks));
         res
     }
 
@@ -141,8 +143,7 @@ impl Handle {
     /// Returns the current time for the scheduler
     pub fn now(&self) -> super::Instant {
         let ticks = self.ticks();
-        let duration = crate::time::resolution::ticks_to_duration(ticks);
-        super::Instant(duration)
+        super::Instant::from_ticks(ticks)
     }
 
     fn advance(&self, ticks: u64) {
