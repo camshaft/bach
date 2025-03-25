@@ -178,6 +178,8 @@ struct Slot {
 
 impl Slot {
     fn poll(&mut self, current_tick: u64, max_self_wakes: &Option<usize>) -> Poll<()> {
+        self.waker_state.before_poll();
+
         let cx = &mut Context::from_waker(&self.waker);
         let res = self.runnable.as_mut().poll(cx);
 
@@ -216,8 +218,6 @@ impl Slot {
         } else {
             self.self_wakes.reset(current_tick);
         }
-
-        self.waker_state.after_poll();
     }
 }
 

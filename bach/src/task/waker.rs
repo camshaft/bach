@@ -54,7 +54,7 @@ impl ForTask {
         }
     }
 
-    pub fn after_poll(&self) {
+    pub fn before_poll(&self) {
         self.woken.store(false, Ordering::Relaxed);
     }
 }
