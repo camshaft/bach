@@ -157,3 +157,93 @@ fn udp_unidirectional() {
         .spawn();
     });
 }
+
+#[cfg(feature = "net-monitor")]
+mod monitors {
+    use super::*;
+    use crate::sim;
+    use bach::net::monitor;
+    use std::{
+        io,
+        sync::atomic::{AtomicUsize, Ordering},
+    };
+
+    #[test]
+    fn packet_sent_counter() {
+        static COUNT: AtomicUsize = AtomicUsize::new(0);
+
+        sim(|| {
+            monitor::on_packet_sent(|packet| {
+                info!(?packet, "packet_sent");
+                COUNT.fetch_add(1, Ordering::Relaxed);
+                Default::default()
+            });
+
+            udp_ping_pong();
+        });
+
+        assert_eq!(COUNT.load(Ordering::Relaxed), 4);
+    }
+
+    #[test]
+    fn socket_read_write_counter() {
+        static W_COUNT: AtomicUsize = AtomicUsize::new(0);
+        static R_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+        sim(|| {
+            monitor::on_socket_write(|write| {
+                info!(?write, "socket_write");
+                W_COUNT.fetch_add(1, Ordering::Relaxed);
+                Ok(())
+            });
+            monitor::on_socket_read(|read| {
+                info!(?read, "socket_read");
+                R_COUNT.fetch_add(1, Ordering::Relaxed);
+                Ok(())
+            });
+
+            udp_ping_pong();
+        });
+
+        assert_eq!(W_COUNT.load(Ordering::Relaxed), 4);
+        assert_eq!(R_COUNT.load(Ordering::Relaxed), 4);
+    }
+
+    #[test]
+    #[should_panic = "SOCKET_WRITE_FAIL"]
+    fn socket_write_fail_counter() {
+        sim(|| {
+            monitor::on_socket_write(|write| {
+                info!(?write, "socket_write");
+                Err(io::Error::new(io::ErrorKind::Other, "SOCKET_WRITE_FAIL"))
+            });
+
+            udp_ping_pong();
+        });
+    }
+
+    #[test]
+    #[should_panic = "SOCKET_READ_FAIL"]
+    fn socket_read_fail_counter() {
+        sim(|| {
+            monitor::on_socket_read(|read| {
+                info!(?read, "socket_read");
+                Err(io::Error::new(io::ErrorKind::Other, "SOCKET_READ_FAIL"))
+            });
+
+            udp_ping_pong();
+        });
+    }
+
+    #[test]
+    #[should_panic = "PACKET_SENT"]
+    fn packet_monitor_panic() {
+        sim(|| {
+            monitor::on_packet_sent(|_| {
+                panic!("PACKET_SENT");
+            });
+
+            udp_ping_pong();
+        });
+    }
+}

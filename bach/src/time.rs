@@ -28,7 +28,7 @@ pub fn sleep_until(target: Instant) -> Sleep {
     sleep(duration)
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Ord, PartialOrd, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub struct Instant(Duration);
 
 impl Instant {
@@ -87,6 +87,14 @@ impl ops::AddAssign<Duration> for Instant {
     }
 }
 
+impl fmt::Debug for Instant {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Instant")
+            .field(&format_args!("{self:#}"))
+            .finish()
+    }
+}
+
 impl fmt::Display for Instant {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let duration = self.elapsed_since_start();
@@ -94,7 +102,15 @@ impl fmt::Display for Instant {
         let secs = duration.as_secs() % 60;
         let mins = duration.as_secs() / 60 % 60;
         let hours = duration.as_secs() / 60 / 60;
-        write!(f, "{hours}:{mins:02}:{secs:02}.{nanos:09}")
+        if f.alternate() {
+            match (hours, mins) {
+                (0, 0) => write!(f, "{secs}.{nanos}"),
+                (0, _) => write!(f, "{mins}:{secs:02}.{nanos}"),
+                (_, _) => write!(f, "{hours}:{mins:02}:{secs:02}.{nanos}"),
+            }
+        } else {
+            write!(f, "{hours}:{mins:02}:{secs:02}.{nanos:09}")
+        }
     }
 }
 

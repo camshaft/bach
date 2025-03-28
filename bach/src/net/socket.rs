@@ -49,7 +49,7 @@ pub struct RecvResult {
     pub ecn: u8,
     pub len: usize,
     pub segment_len: usize,
-    pub truncated: bool,
+    pub truncation_len: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
