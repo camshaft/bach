@@ -1,11 +1,12 @@
 use crate::{
     environment::net::{
         ip::{Packet, Segments},
+        monitor::List as Monitors,
         pcap::{self, QueueExt as _},
     },
     ext::*,
     group::Group,
-    net::SocketAddr,
+    net::{monitor::DropReason, SocketAddr},
     queue::vec_deque,
     sync::channel::{Receiver, Sender},
 };
@@ -21,18 +22,32 @@ mod sender;
 
 type SenderMap = sender::Map<Sender<Packet>>;
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub struct Dispatch {
     inner: Arc<Mutex<HashMap<SocketAddr, SenderMap>>>,
+    monitors: Monitors,
 }
 
 impl Dispatch {
+    pub(crate) fn new(monitors: Monitors) -> Self {
+        Self {
+            inner: Default::default(),
+            monitors,
+        }
+    }
+
     pub async fn send(&self, packet: Packet) {
+        if self.monitors.on_packet_received(&packet).is_drop() {
+            return;
+        }
+
         let mut sender = if let Ok(inner) = self.inner.lock() {
             if let Some(senders) = inner.get(&packet.destination()) {
                 senders.lookup(packet.source())
             } else {
                 count!("packet_dropped", 1);
+                self.monitors
+                    .on_packet_dropped(&packet, DropReason::UnknownDestination);
                 return;
             }
         } else {
@@ -40,7 +55,9 @@ impl Dispatch {
             return;
         };
 
-        if let Ok(Some(_prev)) = sender.push_nowait(packet).await {
+        if let Ok(Some(prev)) = sender.push_nowait(packet).await {
+            self.monitors
+                .on_packet_dropped(&prev, DropReason::ReceiveBufferFull);
             count!("packet_dropped", 1);
         }
     }
@@ -97,6 +114,7 @@ pub trait Allocator {
         group: &Group,
         addr: SocketAddr,
         dispatch: &Dispatch,
+        monitors: &Monitors,
         pcaps: &mut pcap::Registry,
     ) -> PacketQueue;
 }
@@ -155,6 +173,7 @@ impl Allocator for Fixed {
         group: &Group,
         addr: SocketAddr,
         dispatch: &Dispatch,
+        monitors: &Monitors,
         pcaps: &mut pcap::Registry,
     ) -> PacketQueue {
         let (tx_sender, mut tx_receiver) = vec_deque::Queue::builder()
@@ -196,17 +215,23 @@ impl Allocator for Fixed {
             net.mutex().channel()
         };
 
-        async move {
-            while let Ok(segments) = tx_receiver.recv().await {
-                for packet in segments {
-                    if net_send.push_nowait(packet).await.is_err() {
-                        break;
+        {
+            let monitors = monitors.clone();
+            async move {
+                while let Ok(segments) = tx_receiver.recv().await {
+                    for packet in segments {
+                        if monitors.on_packet_sent(&packet).is_drop() {
+                            continue;
+                        }
+                        if net_send.push_nowait(packet).await.is_err() {
+                            break;
+                        }
                     }
                 }
+                let _ = tx_receiver.close();
             }
-            let _ = tx_receiver.close();
+            .spawn_named(format_args!("udp://{addr}/net/local"));
         }
-        .spawn_named(format_args!("udp://{addr}/net/local"));
 
         let senders = dispatch.clone();
         async move {

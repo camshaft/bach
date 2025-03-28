@@ -1,9 +1,13 @@
 use crate::sim;
 use bach::{
     ext::*,
-    net::{lookup_host, socket::SendOptions, UdpSocket},
+    net::{lookup_host, monitor, socket::SendOptions, UdpSocket},
 };
-use std::{io::IoSlice, time::Duration};
+use std::{
+    io::IoSlice,
+    sync::atomic::{AtomicUsize, Ordering},
+    time::Duration,
+};
 use tracing::info;
 
 fn udp_ping_pong() {
@@ -155,5 +159,34 @@ fn udp_unidirectional() {
         .primary()
         .group("server")
         .spawn();
+    });
+}
+
+#[test]
+fn packet_monitor() {
+    static COUNT: AtomicUsize = AtomicUsize::new(0);
+
+    sim(|| {
+        monitor::on_packet_sent(|packet| {
+            info!(?packet, "packet_sent");
+            COUNT.fetch_add(1, Ordering::Relaxed);
+            Default::default()
+        });
+
+        udp_ping_pong();
+    });
+
+    assert_eq!(COUNT.load(Ordering::Relaxed), 4);
+}
+
+#[test]
+#[should_panic = "PACKET_SENT"]
+fn packet_monitor_panic() {
+    sim(|| {
+        monitor::on_packet_sent(|_| {
+            panic!("PACKET_SENT");
+        });
+
+        udp_ping_pong();
     });
 }
