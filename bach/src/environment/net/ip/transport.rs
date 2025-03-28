@@ -3,13 +3,28 @@ use bytes::Bytes;
 use s2n_quic_core::inet::Protocol;
 use std::io::{self, IoSliceMut};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[non_exhaustive]
+pub enum Kind {
+    Tcp,
+    Udp,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+#[non_exhaustive]
 pub enum Transport {
     Tcp(Tcp),
     Udp(Udp),
 }
 
 impl Transport {
+    pub fn kind(&self) -> Kind {
+        match self {
+            Transport::Tcp(_) => Kind::Tcp,
+            Transport::Udp(_) => Kind::Udp,
+        }
+    }
+
     pub fn source(&self) -> u16 {
         match self {
             Transport::Tcp(t) => t.source,

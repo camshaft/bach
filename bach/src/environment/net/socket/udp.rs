@@ -1,10 +1,11 @@
 use crate::{
     environment::net::{
         ip::{header, transport, Category, Header, Packet, Segments},
+        monitor::List as Monitors,
         socket::{self, RecvOptions, RecvResult, SendOptions},
     },
     ext::*,
-    net::SocketAddr,
+    net::{monitor::SocketWrite, SocketAddr},
     queue::Pushable,
     sync::channel,
 };
@@ -16,6 +17,7 @@ pub struct Socket {
     receiver: Mutex<Receiver>,
     local_addr: SocketAddr,
     peer_addr: Mutex<Option<SocketAddr>>,
+    monitors: Monitors,
 }
 
 macro_rules! lock {
@@ -31,6 +33,7 @@ impl Socket {
         sender: channel::Sender<Segments>,
         receiver: channel::Receiver<Packet>,
         local_addr: SocketAddr,
+        monitors: Monitors,
     ) -> Self {
         let sender = Mutex::new(Sender::new(sender));
         let receiver = Mutex::new(Receiver::new(receiver));
@@ -39,6 +42,7 @@ impl Socket {
             receiver,
             local_addr,
             peer_addr: Mutex::new(None),
+            monitors,
         }
     }
 }
@@ -102,7 +106,15 @@ impl socket::Socket for Socket {
         opts: SendOptions,
     ) -> io::Result<usize> {
         let peer_addr = *lock!(self.peer_addr);
-        lock!(self.sender).sendmsg(cx, &self.local_addr, peer_addr, destination, payload, opts)
+        lock!(self.sender).sendmsg(
+            cx,
+            &self.local_addr,
+            peer_addr,
+            destination,
+            payload,
+            opts,
+            &self.monitors,
+        )
     }
 
     fn recvmsg(
@@ -112,7 +124,7 @@ impl socket::Socket for Socket {
         opts: RecvOptions,
     ) -> io::Result<RecvResult> {
         let peer_addr = *lock!(self.peer_addr);
-        lock!(self.receiver).recvmsg(cx, peer_addr, payload, opts)
+        lock!(self.receiver).recvmsg(cx, peer_addr, payload, opts, &self.monitors)
     }
 
     fn shutdown(&self, how: std::net::Shutdown) -> io::Result<()> {
@@ -145,6 +157,7 @@ impl Sender {
         destination: &SocketAddr,
         payload: &[io::IoSlice],
         opts: super::SendOptions,
+        monitors: &Monitors,
     ) -> io::Result<usize> {
         let destination = if destination.is_unspecified() {
             peer_addr.as_ref().ok_or_else(|| {
@@ -198,6 +211,16 @@ impl Sender {
                 ))
             }
         };
+
+        let socket_write = SocketWrite {
+            local_addr,
+            peer_addr: destination,
+            transport: transport::Kind::Udp,
+            payload,
+            opts: &opts,
+        };
+
+        monitors.on_socket_write(&socket_write)?;
 
         let transport = transport::Udp {
             source: local_addr.port(),
@@ -292,6 +315,7 @@ impl Receiver {
         peer_addr: Option<SocketAddr>,
         payload: &mut [io::IoSliceMut],
         opts: RecvOptions,
+        monitors: &Monitors,
     ) -> io::Result<RecvResult> {
         if opts.peek {
             return Err(io::Error::new(

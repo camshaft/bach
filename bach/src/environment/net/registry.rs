@@ -1,16 +1,18 @@
 use crate::{
     environment::net::{
-        ip, port,
+        ip,
+        monitor::List as Monitors,
+        port,
         queue::{self, Dispatch},
         socket::{self, reservation},
     },
     group::Group,
-    net::IpAddr,
+    net::{monitor::Monitor, IpAddr},
     scope::define,
 };
 use std::{collections::HashMap, io};
 
-use super::pcap;
+use super::{ip::transport, pcap};
 
 define!(scope, Box<Registry>);
 
@@ -34,6 +36,7 @@ pub struct Registry {
     ips: ip::Allocator,
     pcaps: pcap::Registry,
     queue_alloc: Box<dyn queue::Allocator>,
+    monitors: Monitors,
 }
 
 impl Default for Registry {
@@ -44,13 +47,15 @@ impl Default for Registry {
 
 impl Registry {
     pub fn new(queue: Box<dyn queue::Allocator>) -> Self {
+        let monitors = Monitors::default();
         Self {
             hostnames: HashMap::new(),
-            senders: Default::default(),
+            senders: Dispatch::new(monitors.clone()),
             groups: HashMap::new(),
             ips: ip::Allocator::default(),
             pcaps: Default::default(),
             queue_alloc: queue,
+            monitors,
         }
     }
 
@@ -114,6 +119,10 @@ impl Registry {
         Ok(ip)
     }
 
+    pub fn register_monitor<M: Monitor>(&mut self, monitor: M) {
+        self.monitors.push(monitor);
+    }
+
     pub fn register_udp_socket(
         &mut self,
         group: &Group,
@@ -142,16 +151,23 @@ impl Registry {
             state.udp.reserve(local_addr.port(), options.reuse_port)?
         };
 
+        self.monitors
+            .on_socket_opened(&local_addr, transport::Kind::Udp)?;
+
         let queue::PacketQueue {
             local_sender: sender,
             local_receiver: receiver,
             remote_sender,
-        } = self
-            .queue_alloc
-            .for_udp(group, local_addr, &self.senders, &mut self.pcaps);
+        } = self.queue_alloc.for_udp(
+            group,
+            local_addr,
+            &self.senders,
+            &self.monitors,
+            &mut self.pcaps,
+        );
 
         let reservation = (reservation, self.senders.reserve(local_addr, remote_sender));
-        let socket = socket::udp::Socket::new(sender, receiver, local_addr);
+        let socket = socket::udp::Socket::new(sender, receiver, local_addr, self.monitors.clone());
         let socket = reservation::Socket::new(socket, reservation);
 
         Ok(Box::new(socket))
