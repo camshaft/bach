@@ -45,37 +45,6 @@ impl Runtime {
         self
     }
 
-    #[cfg(feature = "net")]
-    pub fn with_net_queues(mut self, net: Option<Box<dyn net::queue::Allocator>>) -> Self {
-        if let Some(queue) = net {
-            let net = &mut self.inner.environment().net;
-            if let Some(net) = net.as_mut() {
-                net.set_queue(queue);
-            } else {
-                *net = Some(Box::new(net::registry::Registry::new(queue)));
-            };
-        } else {
-            self.inner.environment().net = None;
-        }
-        self
-    }
-
-    #[cfg(feature = "net")]
-    pub fn with_subnet(mut self, subnet: crate::net::IpAddr) -> Self {
-        if let Some(net) = self.inner.environment().net.as_mut() {
-            net.set_subnet(subnet);
-        }
-        self
-    }
-
-    #[cfg(feature = "net")]
-    pub fn with_pcap_dir<P: Into<std::path::PathBuf>>(mut self, dir: P) -> std::io::Result<Self> {
-        if let Some(net) = self.inner.environment().net.as_mut() {
-            net.set_pcap_dir(dir)?;
-        }
-        Ok(self)
-    }
-
     pub fn run<F: FnOnce() -> R, R>(&mut self, f: F) -> R {
         let result = self.inner.environment().enter(|_| f());
 
@@ -97,6 +66,44 @@ impl Runtime {
             .environment()
             .time
             .enter(|ticks| crate::time::Instant::from_ticks(ticks).elapsed_since_start())
+    }
+}
+
+#[cfg(feature = "net")]
+impl Runtime {
+    pub fn with_net_queues(mut self, net: Option<Box<dyn net::queue::Allocator>>) -> Self {
+        if let Some(queue) = net {
+            let net = &mut self.inner.environment().net;
+            if let Some(net) = net.as_mut() {
+                net.set_queue(queue);
+            } else {
+                *net = Some(Box::new(net::registry::Registry::new(queue)));
+            };
+        } else {
+            self.inner.environment().net = None;
+        }
+        self
+    }
+
+    pub fn with_subnet(mut self, subnet: crate::net::IpAddr) -> Self {
+        if let Some(net) = self.inner.environment().net.as_mut() {
+            net.set_subnet(subnet);
+        }
+        self
+    }
+
+    pub fn with_pcap_dir<P: Into<std::path::PathBuf>>(mut self, dir: P) -> std::io::Result<Self> {
+        if let Some(net) = self.inner.environment().net.as_mut() {
+            net.set_pcap_dir(dir)?;
+        }
+        Ok(self)
+    }
+
+    pub fn with_net_monitor(mut self, enabled: bool) -> Self {
+        if let Some(net) = self.inner.environment().net.as_mut() {
+            net.set_monitor(enabled);
+        }
+        self
     }
 }
 

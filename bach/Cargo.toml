@@ -9,9 +9,10 @@ edition = "2021"
 
 [features]
 coop = []
-full = ["coop", "metrics", "net", "tracing"]
+full = ["coop", "metrics", "net", "net-monitor", "tracing"]
 metrics = ["dep:metrics"]
 net = ["dep:bytes", "dep:s2n-quic-core", "dep:siphasher", "dep:tokio"]
+net-monitor = []
 tokio-compat = ["dep:tokio", "tokio/time"]
 tracing = ["dep:tracing"]
 

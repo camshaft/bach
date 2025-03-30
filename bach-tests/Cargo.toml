@@ -6,11 +6,12 @@ license = "MIT"
 publish = false
 
 [features]
-default = ["coop", "net", "tracing"]
+default = ["coop", "net", "net-monitor", "tracing"]
 coop = ["bach/coop"]
 leaks = ["dep:checkers"]
 metrics = ["bach/metrics"]
 net = ["bach/net"]
+net-monitor = ["bach/net-monitor"]
 tracing = ["bach/tracing"]
 
 [dependencies]
