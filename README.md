@@ -1,6 +1,6 @@
 # Bach:
 
-**Bach** is a Rust-based framework for simulating and testing complex async/await-based systems in a non-real-time environment. It's capable of modeling network protocols, queueing systems, and concurrent task interactions with  testing and visualization tools.
+**Bach** is a Rust-based framework for simulating and testing complex async/await-based systems in a non-real-time environment. It's capable of modeling network protocols, queueing systems, and concurrent task interactions with testing and visualization tools.
 
 ## Key Features
 - **Discrete Event Simulation**: Schedules events in simulated time for deterministic testing.
