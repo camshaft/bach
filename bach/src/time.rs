@@ -103,10 +103,12 @@ impl fmt::Display for Instant {
         let mins = duration.as_secs() / 60 % 60;
         let hours = duration.as_secs() / 60 / 60;
         if f.alternate() {
-            match (hours, mins) {
-                (0, 0) => write!(f, "{secs}.{nanos}"),
-                (0, _) => write!(f, "{mins}:{secs:02}.{nanos}"),
-                (_, _) => write!(f, "{hours}:{mins:02}:{secs:02}.{nanos}"),
+            let days = duration.as_secs() / 86400;
+            match (days, hours, mins) {
+                (0, 0, 0) => write!(f, "{secs}.{nanos}"),
+                (0, 0, _) => write!(f, "{mins}:{secs:02}.{nanos}"),
+                (0, _, _) => write!(f, "{hours}:{mins:02}:{secs:02}.{nanos}"),
+                (_, _, _) => write!(f, "{days}:{hours}:{mins:02}:{secs:02}.{nanos}"),
             }
         } else {
             write!(f, "{hours}:{mins:02}:{secs:02}.{nanos:09}")

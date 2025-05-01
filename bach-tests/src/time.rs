@@ -66,6 +66,23 @@ fn timer_test() {
 }
 
 #[test]
+fn long_delays() {
+    sim(|| {
+        let mut delay = Duration::from_secs(1);
+        for i in [1, 60, 60, 24, 365, 25, 4] {
+            delay *= i;
+            info!(?delay);
+            async move {
+                delay.sleep().await;
+                info!("done");
+            }
+            .primary()
+            .spawn();
+        }
+    });
+}
+
+#[test]
 fn self_wake_pacing() {
     sim(|| {
         async {
