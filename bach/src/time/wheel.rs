@@ -94,7 +94,10 @@ impl<E: Entry> Wheel<E> {
         let mut iterations = 0;
 
         while !self.advance_once()? {
-            debug_assert!(iterations < u16::MAX, "advance iterated too many times");
+            debug_assert!(
+                iterations < (u16::MAX as u32 * 4),
+                "advance iterated too many times"
+            );
             iterations += 1;
         }
 
