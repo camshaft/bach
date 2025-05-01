@@ -19,7 +19,8 @@ mod standard {
     impl Scope {
         pub fn new(seed: u64) -> Self {
             let rng = Xoshiro256PlusPlus::seed_from_u64(seed);
-            let driver = driver::Rng::new(rng, &Default::default());
+            let options = driver::Options::default().with_max_len(usize::MAX);
+            let driver = driver::Rng::new(rng, &options);
             let driver = driver::object::Object(driver);
             let driver = Box::new(driver);
             Self {
