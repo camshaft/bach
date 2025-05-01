@@ -63,7 +63,7 @@ $ BACH_PCAP_DIR=target/bach/pcaps cargo test
 Add to `Cargo.toml`:
 ```toml
 [dependencies]
-bach = "0.1" # Replace with the latest version
+bach = "0.1"
 ```
 
 ## Related Projects
