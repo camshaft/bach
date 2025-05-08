@@ -8,6 +8,7 @@ license = "MIT"
 edition = "2021"
 
 [features]
+default = ["net"]
 coop = []
 full = ["coop", "metrics", "net", "net-monitor", "tracing"]
 metrics = ["dep:metrics"]
