@@ -1,3 +1,5 @@
+#![doc = include_str!("../README.md")]
+
 extern crate alloc;
 
 #[macro_use]
@@ -25,4 +27,10 @@ pub use task::spawn;
 /// Returns `true` if the caller is being executed in a `bach` environment
 pub fn is_active() -> bool {
     task::scope::try_borrow_with(|scope| scope.is_some())
+}
+
+/// Runs a simulation using the default environment
+pub fn sim<F: FnOnce() -> R, R>(f: F) -> R {
+    let mut rt = environment::default::Runtime::new();
+    rt.run(f)
 }

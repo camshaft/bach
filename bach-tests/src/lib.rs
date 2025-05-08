@@ -1,5 +1,3 @@
-use bach::environment::default::Runtime;
-
 #[cfg(feature = "leaks")]
 #[global_allocator]
 static ALLOC: checkers::Allocator = checkers::Allocator::system();
@@ -29,24 +27,17 @@ pub mod benches;
 pub mod testing;
 
 #[cfg(not(feature = "leaks"))]
-pub fn sim(f: impl FnOnce()) -> std::time::Duration {
+pub fn sim<F: FnOnce()>(f: F) {
     crate::testing::init_tracing();
-    let mut rt = Runtime::new();
-    rt.run(f);
-    rt.elapsed()
+    bach::sim(f);
 }
 
 #[cfg(feature = "leaks")]
-pub fn sim(f: impl FnOnce()) -> std::time::Duration {
+pub fn sim<F: FnOnce()>(f: F) {
     use checkers::Violation;
 
-    let mut time = std::time::Duration::ZERO;
     let snapshot = checkers::with(|| {
-        let mut rt = Runtime::default();
-        // initialize all of the thread locals
-        rt.run(f);
-        time = rt.elapsed();
-        drop(rt);
+        bach::sim(f);
     });
 
     let mut violations = vec![];
@@ -77,6 +68,4 @@ pub fn sim(f: impl FnOnce()) -> std::time::Duration {
     });
 
     assert!(violations.is_empty(), "{violations:?}");
-
-    time
 }

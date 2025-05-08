@@ -1,4 +1,4 @@
-# Bach:
+# Bach
 
 **Bach** is a Rust-based framework for simulating and testing complex async/await-based systems in a non-real-time environment. It's capable of modeling network protocols, queueing systems, and concurrent task interactions with testing and visualization tools.
 
@@ -19,7 +19,6 @@ This example simulates two clients sending "ping" to a server over UDP, which re
 
 ```rust
 use bach::{ext::*, net::UdpSocket};
-use std::time::Duration;
 
 #[test]
 fn ping_pong() {
@@ -54,7 +53,7 @@ fn ping_pong() {
 
 This test can be executed with the following command, while also exporting pcaps showing the interaction between the tasks:
 
-```
+```bash
 $ BACH_PCAP_DIR=target/bach/pcaps cargo test
 ```
 
