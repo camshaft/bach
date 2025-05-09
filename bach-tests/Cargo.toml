@@ -24,7 +24,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
-half = "=2.4.1" # Can be unpinned when we move to MSRV 1.81
+half = "=2.6.0" # Can be unpinned when we move to MSRV 1.81
 
 [[bench]]
 name = "bench"
