@@ -1,0 +1,120 @@
+---
+source: bach-tests/src/sync/mutex.rs
+expression: LOG.check()
+---
+[
+    Start,
+    MutexAcquired {
+        task: 0,
+    },
+    MutexReleased {
+        task: 0,
+    },
+    MutexAcquired {
+        task: 1,
+    },
+    MutexReleased {
+        task: 1,
+    },
+    MutexAcquired {
+        task: 2,
+    },
+    MutexReleased {
+        task: 2,
+    },
+    Start,
+    MutexAcquired {
+        task: 0,
+    },
+    MutexReleased {
+        task: 0,
+    },
+    MutexAcquired {
+        task: 2,
+    },
+    MutexReleased {
+        task: 2,
+    },
+    MutexAcquired {
+        task: 1,
+    },
+    MutexReleased {
+        task: 1,
+    },
+    Start,
+    MutexAcquired {
+        task: 1,
+    },
+    MutexReleased {
+        task: 1,
+    },
+    MutexAcquired {
+        task: 0,
+    },
+    MutexReleased {
+        task: 0,
+    },
+    MutexAcquired {
+        task: 2,
+    },
+    MutexReleased {
+        task: 2,
+    },
+    Start,
+    MutexAcquired {
+        task: 1,
+    },
+    MutexReleased {
+        task: 1,
+    },
+    MutexAcquired {
+        task: 2,
+    },
+    MutexReleased {
+        task: 2,
+    },
+    MutexAcquired {
+        task: 0,
+    },
+    MutexReleased {
+        task: 0,
+    },
+    Start,
+    MutexAcquired {
+        task: 2,
+    },
+    MutexReleased {
+        task: 2,
+    },
+    MutexAcquired {
+        task: 1,
+    },
+    MutexReleased {
+        task: 1,
+    },
+    MutexAcquired {
+        task: 0,
+    },
+    MutexReleased {
+        task: 0,
+    },
+    Start,
+    MutexAcquired {
+        task: 2,
+    },
+    MutexReleased {
+        task: 2,
+    },
+    MutexAcquired {
+        task: 0,
+    },
+    MutexReleased {
+        task: 0,
+    },
+    MutexAcquired {
+        task: 1,
+    },
+    MutexReleased {
+        task: 1,
+    },
+]

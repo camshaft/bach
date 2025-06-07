@@ -1,8 +1,12 @@
 use super::waker;
-use crate::queue::{self, QueueExt as _};
+use crate::{
+    queue::{self, QueueExt as _},
+    task,
+};
 use core::fmt;
 use slotmap::{new_key_type, SlotMap};
 use std::{
+    backtrace::Backtrace,
     pin::Pin,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -82,16 +86,17 @@ impl Supervisor {
         self.0.max_self_wakes = max_self_wakes;
     }
 
-    pub fn task_counts(&self) -> Arc<AtomicU64> {
-        self.0.task_counts.clone()
-    }
-
     pub fn events(&self) -> Events {
         self.0.events.clone()
     }
 
     pub fn microstep(&mut self, current_tick: u64) -> usize {
         self.0.microstep(current_tick)
+    }
+
+    /// Collect diagnostic information about all tasks
+    pub fn diagnostics(&mut self) -> Vec<TaskDiagnostics> {
+        self.0.diagnostics()
     }
 
     pub fn close(&mut self) -> Closer {
@@ -112,6 +117,16 @@ struct Inner {
 }
 
 impl Inner {
+    fn diagnostics(&mut self) -> Vec<TaskDiagnostics> {
+        let mut diagnostics = Vec::new();
+
+        for (_task_id, task) in self.tasks.iter_mut() {
+            diagnostics.push(task.diagnostic());
+        }
+
+        diagnostics
+    }
+
     fn microstep(&mut self, current_tick: u64) -> usize {
         let mut count = 0;
         let Ok(mut guard) = self.events.lock() else {
@@ -169,6 +184,38 @@ impl Inner {
     }
 }
 
+/// Diagnostic information about a task
+#[derive(Debug)]
+pub struct TaskDiagnostics {
+    /// Type name of the task
+    pub type_name: &'static str,
+    /// Information about the task
+    pub info: Option<task::Info>,
+    /// A backtrace captured during the task's most recent poll
+    pub backtrace: Option<Backtrace>,
+}
+
+impl fmt::Display for TaskDiagnostics {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(info) = &self.info {
+            if let Some(name) = info.name() {
+                writeln!(f, "Task: {name}")?;
+                writeln!(f, "  Type: {}", self.type_name)?;
+            } else {
+                writeln!(f, "Task: {}", self.type_name)?;
+            }
+        } else {
+            writeln!(f, "Task: {}", self.type_name)?;
+        }
+
+        if let Some(backtrace) = &self.backtrace {
+            writeln!(f, "\n  Backtrace:\n{}", backtrace)?;
+        }
+
+        Ok(())
+    }
+}
+
 struct Slot {
     waker_state: Arc<waker::ForTask>,
     waker: Waker,
@@ -189,6 +236,33 @@ impl Slot {
         }
 
         res
+    }
+
+    fn diagnostic(&mut self) -> TaskDiagnostics {
+        self.waker_state.before_poll();
+
+        // Create a BacktraceWaker that will capture stack traces when cloned
+        let backtrace_waker = Arc::new(super::waker::DiagnosticWaker::new(self.waker.clone()));
+        let waker = backtrace_waker.clone().into_waker();
+
+        // Create a context with our waker
+        let cx = &mut Context::from_waker(&waker);
+
+        // Poll the runnable, which may cause the waker to be cloned if the task is pending
+        // and is waiting on some resource
+        let _ = self.runnable.as_mut().poll(cx);
+
+        let (info, backtrace) = if let Some((info, backtrace)) = backtrace_waker.take() {
+            (Some(info), Some(backtrace))
+        } else {
+            (None, None)
+        };
+
+        TaskDiagnostics {
+            type_name: self.runnable.type_name(),
+            info,
+            backtrace,
+        }
     }
 
     fn check_status(&mut self, current_tick: u64, max_self_wakes: &Option<usize>) {

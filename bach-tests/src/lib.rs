@@ -19,6 +19,8 @@ tests!(
     net,
     panics,
     queue,
+    #[cfg(feature = "coop")]
+    sync,
     task,
     time,
 );

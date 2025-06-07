@@ -4,6 +4,7 @@ pub struct Macrostep {
     pub tasks: usize,
     pub ticks: u64,
     pub primary_count: u64,
+    pub stalled: bool,
 }
 
 impl Macrostep {

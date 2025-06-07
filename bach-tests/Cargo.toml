@@ -12,6 +12,7 @@ leaks = ["dep:checkers"]
 metrics = ["bach/metrics"]
 net = ["bach/net"]
 net-monitor = ["bach/net-monitor"]
+tokio-compat = ["bach/tokio-compat"]
 tracing = ["bach/tracing"]
 
 [dependencies]
