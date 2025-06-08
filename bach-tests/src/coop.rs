@@ -1,5 +1,5 @@
+use crate::testing::Log;
 use bach::{environment::default::Runtime, ext::*, queue::vec_deque::Queue};
-use std::{collections::HashMap, sync::Mutex};
 
 pub fn sim(f: impl Fn()) -> impl Fn() {
     crate::testing::init_tracing();
@@ -23,45 +23,18 @@ enum Event {
     },
 }
 
-impl Event {
-    fn check(v: &[Event]) -> &[Event] {
-        let mut group = vec![];
-        let mut seen = HashMap::<_, usize>::new();
-        for event in v {
-            match *event {
-                Event::Start => {
-                    let group = std::mem::take(&mut group);
-                    *seen.entry(group).or_default() += 1;
-                }
-                _ => {
-                    group.push(*event);
-                }
-            }
-        }
-        *seen.entry(group).or_default() += 1;
-
-        let mut duplicate = false;
-
-        for (group, count) in seen {
-            if count == 1 {
-                continue;
-            }
-            duplicate = true;
-            eprintln!("duplicate ({count}): {group:#?}");
-        }
-
-        assert!(!duplicate, "duplicate interleavings found");
-
-        v
+impl crate::testing::Event for Event {
+    fn is_start(&self) -> bool {
+        matches!(self, Event::Start)
     }
 }
 
 #[test]
 fn interleavings() {
-    static LOG: Mutex<Vec<Event>> = Mutex::new(vec![]);
+    static LOG: Log<Event> = Log::new();
 
     bolero::check!().exhaustive().run(sim(|| {
-        LOG.lock().unwrap().push(Event::Start);
+        LOG.push(Event::Start);
 
         for group in 0..2 {
             let (sender, mut receiver) = Queue::builder()
@@ -72,16 +45,14 @@ fn interleavings() {
 
             async move {
                 while let Ok((sender_group, sender_id)) = receiver.pop().await {
-                    LOG.lock().unwrap().push(Event::Message {
+                    LOG.push(Event::Message {
                         receiver: group,
                         sender_group,
                         sender_id,
                     });
                 }
 
-                LOG.lock()
-                    .unwrap()
-                    .push(Event::ReceiverClose { receiver: group });
+                LOG.push(Event::ReceiverClose { receiver: group });
             }
             .primary()
             .spawn_named(format!("[{group}] server"));
@@ -99,15 +70,15 @@ fn interleavings() {
         }
     }));
 
-    insta::assert_debug_snapshot!(Event::check(&LOG.lock().unwrap()));
+    insta::assert_debug_snapshot!(LOG.check());
 }
 
 #[test]
 fn joined_interleavings() {
-    static LOG: Mutex<Vec<Event>> = Mutex::new(vec![]);
+    static LOG: Log<Event> = Log::new();
 
     bolero::check!().exhaustive().run(sim(|| {
-        LOG.lock().unwrap().push(Event::Start);
+        LOG.push(Event::Start);
         eprintln!("start");
 
         let (sender, receiver) = Queue::builder()
@@ -120,16 +91,14 @@ fn joined_interleavings() {
             let mut receiver = receiver.clone();
             async move {
                 while let Ok((sender_group, sender_id)) = receiver.pop().await {
-                    LOG.lock().unwrap().push(Event::Message {
+                    LOG.push(Event::Message {
                         receiver: group,
                         sender_group,
                         sender_id,
                     });
                 }
 
-                LOG.lock()
-                    .unwrap()
-                    .push(Event::ReceiverClose { receiver: group });
+                LOG.push(Event::ReceiverClose { receiver: group });
             }
             .primary()
             .spawn_named(format!("[{group}] server"));
@@ -147,5 +116,5 @@ fn joined_interleavings() {
         }
     }));
 
-    insta::assert_debug_snapshot!(Event::check(&LOG.lock().unwrap()));
+    insta::assert_debug_snapshot!(LOG.check());
 }

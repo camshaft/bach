@@ -1,0 +1,120 @@
+---
+source: bach-tests/src/sync/rwlock.rs
+expression: LOG.check()
+---
+[
+    Start,
+    ReadAcquired {
+        task: 0,
+    },
+    ReadAcquired {
+        task: 1,
+    },
+    ReadReleased {
+        task: 0,
+    },
+    ReadReleased {
+        task: 1,
+    },
+    WriteAcquired {
+        task: 2,
+    },
+    WriteReleased {
+        task: 2,
+    },
+    Start,
+    ReadAcquired {
+        task: 0,
+    },
+    ReadReleased {
+        task: 0,
+    },
+    WriteAcquired {
+        task: 2,
+    },
+    WriteReleased {
+        task: 2,
+    },
+    ReadAcquired {
+        task: 1,
+    },
+    ReadReleased {
+        task: 1,
+    },
+    Start,
+    ReadAcquired {
+        task: 1,
+    },
+    ReadAcquired {
+        task: 0,
+    },
+    ReadReleased {
+        task: 1,
+    },
+    ReadReleased {
+        task: 0,
+    },
+    WriteAcquired {
+        task: 2,
+    },
+    WriteReleased {
+        task: 2,
+    },
+    Start,
+    ReadAcquired {
+        task: 1,
+    },
+    ReadReleased {
+        task: 1,
+    },
+    WriteAcquired {
+        task: 2,
+    },
+    WriteReleased {
+        task: 2,
+    },
+    ReadAcquired {
+        task: 0,
+    },
+    ReadReleased {
+        task: 0,
+    },
+    Start,
+    WriteAcquired {
+        task: 2,
+    },
+    WriteReleased {
+        task: 2,
+    },
+    ReadAcquired {
+        task: 1,
+    },
+    ReadAcquired {
+        task: 0,
+    },
+    ReadReleased {
+        task: 1,
+    },
+    ReadReleased {
+        task: 0,
+    },
+    Start,
+    WriteAcquired {
+        task: 2,
+    },
+    WriteReleased {
+        task: 2,
+    },
+    ReadAcquired {
+        task: 0,
+    },
+    ReadAcquired {
+        task: 1,
+    },
+    ReadReleased {
+        task: 0,
+    },
+    ReadReleased {
+        task: 1,
+    },
+]

@@ -19,6 +19,8 @@ tests!(
     net,
     panics,
     queue,
+    #[cfg(feature = "coop")]
+    sync,
     task,
     time,
 );
@@ -43,20 +45,43 @@ pub fn sim<F: FnOnce()>(f: F) {
     let mut violations = vec![];
     snapshot.validate(&mut violations);
 
+    fn bt_matches(req: &checkers::Request, predicate: impl Fn(&str) -> bool) -> bool {
+        if let Some(bt) = &req.backtrace {
+            for frame in bt.frames() {
+                for sym in frame.symbols() {
+                    let sym = format!("{sym:?}");
+
+                    if predicate(&sym) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
     violations.retain(|v| {
         match v {
             Violation::Leaked { alloc } => {
-                if let Some(bt) = &alloc.backtrace {
-                    for frame in bt.frames() {
-                        for sym in frame.symbols() {
-                            let sym = format!("{sym:?}");
-
-                            // bolero never cleans up the default state to avoid branching
-                            if sym.contains("bolero_generator::any::default::with") {
-                                return false;
-                            }
-                        }
-                    }
+                if bt_matches(alloc, |sym| {
+                    [
+                        "bolero_generator::any::default::with",
+                        "bach::group::Groups::name_to_id",
+                    ]
+                    .iter()
+                    .any(|pat| sym.contains(pat))
+                }) {
+                    return false;
+                }
+            }
+            Violation::MissingFree { request } => {
+                if bt_matches(request, |sym| {
+                    ["thread_local::destructors"]
+                        .iter()
+                        .any(|pat| sym.contains(pat))
+                }) {
+                    return false;
                 }
             }
             _ => {

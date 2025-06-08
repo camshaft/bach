@@ -14,7 +14,7 @@ impl Default for Runtime {
         let inner = executor::Executor::new(|handle| Environment {
             handle: handle.clone(),
             time: scheduler::Scheduler::new(),
-            rand: Some(rand::Scope::new(0)),
+            rand: None,
             coop: Coop::default(),
             stalled_iterations: 0,
             coop_enabled: false,
@@ -284,8 +284,8 @@ impl super::Environment for Environment {
         // enough number that we won't get false positives but low enough that the number of
         // loops stays within reasonable ranges.
         if self.stalled_iterations > 100 {
-            let snapshot = self.handle.snapshot();
-            panic!("the runtime stalled after 100 iterations.\n\n{snapshot:#?}\n");
+            macrostep.stalled = true;
+            return macrostep;
         }
 
         while let Some(ticks) = self.time.advance() {

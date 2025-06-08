@@ -1,0 +1,798 @@
+---
+source: bach-tests/src/sync/semaphore.rs
+expression: LOG.check()
+---
+[
+    Start,
+    SemaphoreAcquired {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 3,
+        permits: 2,
+    },
+    Start,
+    SemaphoreAcquired {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 2,
+        permits: 1,
+    },
+    Start,
+    SemaphoreAcquired {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 3,
+        permits: 2,
+    },
+    Start,
+    SemaphoreAcquired {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 1,
+        permits: 2,
+    },
+    Start,
+    SemaphoreAcquired {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 1,
+        permits: 2,
+    },
+    Start,
+    SemaphoreAcquired {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 2,
+        permits: 1,
+    },
+    Start,
+    SemaphoreAcquired {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 3,
+        permits: 2,
+    },
+    Start,
+    SemaphoreAcquired {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 2,
+        permits: 1,
+    },
+    Start,
+    SemaphoreAcquired {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 3,
+        permits: 2,
+    },
+    Start,
+    SemaphoreAcquired {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 0,
+        permits: 1,
+    },
+    Start,
+    SemaphoreAcquired {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 0,
+        permits: 1,
+    },
+    Start,
+    SemaphoreAcquired {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 2,
+        permits: 1,
+    },
+    Start,
+    SemaphoreAcquired {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 3,
+        permits: 2,
+    },
+    Start,
+    SemaphoreAcquired {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 0,
+        permits: 1,
+    },
+    Start,
+    SemaphoreAcquired {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 3,
+        permits: 2,
+    },
+    Start,
+    SemaphoreAcquired {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 1,
+        permits: 2,
+    },
+    Start,
+    SemaphoreAcquired {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 1,
+        permits: 2,
+    },
+    Start,
+    SemaphoreAcquired {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 0,
+        permits: 1,
+    },
+    Start,
+    SemaphoreAcquired {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 0,
+        permits: 1,
+    },
+    Start,
+    SemaphoreAcquired {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 2,
+        permits: 1,
+    },
+    Start,
+    SemaphoreAcquired {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 0,
+        permits: 1,
+    },
+    Start,
+    SemaphoreAcquired {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 1,
+        permits: 2,
+    },
+    Start,
+    SemaphoreAcquired {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 1,
+        permits: 2,
+    },
+    Start,
+    SemaphoreAcquired {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreAcquired {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreAcquired {
+        task: 2,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 3,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 0,
+        permits: 1,
+    },
+    SemaphoreReleased {
+        task: 1,
+        permits: 2,
+    },
+    SemaphoreReleased {
+        task: 2,
+        permits: 1,
+    },
+]

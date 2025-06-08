@@ -27,7 +27,6 @@ impl<E: Environment> Executor<E> {
             events: supervisor.events(),
             primary_count: Default::default(),
             ids: Default::default(),
-            task_counts: supervisor.task_counts(),
         };
 
         let environment = create_env(&handle);
@@ -114,6 +113,7 @@ impl<E: Environment> Executor<E> {
             tasks: total,
             ticks: 0,
             primary_count: self.handle.primary_count(),
+            stalled: false,
         };
 
         if stop_at_zero_primary && macrostep.primary_count == 0 {
@@ -124,6 +124,20 @@ impl<E: Environment> Executor<E> {
 
         #[cfg(feature = "metrics")]
         self.environment.enter(|_| macrostep.metrics());
+
+        if macrostep.stalled {
+            let primary_count = self.handle.primary_count();
+            let groups = crate::group::list();
+            let tasks = self.supervisor.diagnostics();
+            let snapshot = Snapshot {
+                primary_count,
+                groups,
+                tasks,
+            };
+            let header = "=====================";
+            let footer = "---------------------";
+            panic!("\n{header}\nRuntime stalled\n{footer}\n\n{snapshot}\n");
+        }
 
         macrostep
     }
@@ -185,7 +199,6 @@ pub struct Handle {
     events: Events,
     primary_count: Arc<AtomicU64>,
     ids: Arc<AtomicU64>,
-    task_counts: Arc<AtomicU64>,
 }
 
 impl Handle {
@@ -226,24 +239,31 @@ impl Handle {
         crate::task::primary::Guard::new(self.primary_count.clone())
     }
 
-    pub fn snapshot(&self) -> Snapshot {
-        let groups = crate::group::list();
-        Snapshot {
-            primary_count: self.primary_count(),
-            tasks: self.task_counts.load(Ordering::Relaxed),
-            groups,
-        }
-    }
-
     fn primary_count(&self) -> u64 {
         self.primary_count.load(Ordering::SeqCst)
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 #[non_exhaustive]
 pub struct Snapshot {
     pub primary_count: u64,
-    pub tasks: u64,
     pub groups: Vec<crate::group::Group>,
+    /// Task diagnostic information
+    pub tasks: Vec<crate::task::supervisor::TaskDiagnostics>,
+}
+
+impl core::fmt::Display for Snapshot {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        writeln!(f, "Primary count: {}", self.primary_count)?;
+        writeln!(f, "Groups: {}", self.groups.len())?;
+        for group in &self.groups {
+            writeln!(f, "  {group}")?;
+        }
+        writeln!(f, "Tasks: {}", self.tasks.len())?;
+        for task in &self.tasks {
+            writeln!(f, "\n{task}")?;
+        }
+        Ok(())
+    }
 }

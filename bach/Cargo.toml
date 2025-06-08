@@ -9,7 +9,7 @@ edition = "2021"
 
 [features]
 default = ["net"]
-coop = []
+coop = ["dep:tokio", "tokio/sync"]
 full = ["coop", "metrics", "net", "net-monitor", "tracing"]
 metrics = ["dep:metrics"]
 net = ["dep:bytes", "dep:s2n-quic-core", "dep:siphasher", "dep:tokio"]
@@ -32,7 +32,9 @@ rand_xoshiro = "0.7"
 s2n-quic-core = { version = "0.59", default-features = false, optional = true }
 siphasher = { version = "1", default-features = false, optional = true }
 slotmap = "1"
-tokio = { version = "1", default-features = false, optional = true }
+tokio = { version = "1", default-features = false, features = [
+    "sync",
+], optional = true }
 tracing = { version = "0.1", optional = true }
 
 [build-dependencies]
@@ -42,7 +44,7 @@ autocfg = "1"
 bolero.workspace = true
 bytes = "1"
 pcap-parser = "0.16"
-tokio = { version = "1", default-features = false }
+tokio = { version = "1", default-features = false, features = ["sync"] }
 
 [lints.rust.unexpected_cfgs]
 level = "warn"

@@ -1,11 +1,13 @@
 use super::supervisor::{self, Events, TaskId};
-use crate::sync::queue::Shared as _;
+use crate::{sync::queue::Shared as _, task::Info};
 use std::{
+    backtrace::Backtrace,
+    mem::ManuallyDrop,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, Mutex,
     },
-    task::Wake,
+    task::{RawWaker, RawWakerVTable, Wake, Waker},
 };
 
 mod noop {
@@ -28,6 +30,85 @@ mod noop {
 }
 
 pub use noop::noop;
+
+// BacktraceWaker implementation for capturing stack traces
+// during deadlock detection
+
+/// A waker that captures backtraces when cloned
+pub struct DiagnosticWaker {
+    // The underlying waker to delegate actual wake operations to
+    real_waker: Waker,
+    // The backtrace captured when this waker was cloned
+    captured: Mutex<Option<(Info, Backtrace)>>,
+}
+
+impl DiagnosticWaker {
+    /// Creates a new BacktraceWaker wrapping the given waker
+    pub fn new(waker: Waker) -> Self {
+        Self {
+            real_waker: waker,
+            captured: Mutex::new(None),
+        }
+    }
+
+    /// Get the captured backtrace
+    pub fn take(&self) -> Option<(Info, Backtrace)> {
+        self.captured.lock().unwrap().take()
+    }
+
+    /// Creates a waker that captures backtraces when cloned
+    pub fn into_waker(self: Arc<Self>) -> Waker {
+        let data = Arc::into_raw(self) as *const ();
+        unsafe { Waker::from_raw(RawWaker::new(data, Self::waker_vtable())) }
+    }
+
+    // RawWaker vtable implementation
+    fn waker_vtable() -> &'static RawWakerVTable {
+        &RawWakerVTable::new(
+            Self::clone_raw,
+            Self::wake_raw,
+            Self::wake_by_ref_raw,
+            Self::drop_raw,
+        )
+    }
+
+    /// Clone implementation that captures a backtrace when the waker is cloned
+    unsafe fn clone_raw(ptr: *const ()) -> RawWaker {
+        let this = Arc::from_raw(ptr as *const Self);
+        let this = ManuallyDrop::new(this);
+
+        // Capture a backtrace when the waker is cloned
+        // This happens when a task suspends (Poll::Pending) and registers its waker
+        // with some resource it's waiting on
+        if let Ok(mut guard) = this.captured.lock() {
+            if guard.is_none() {
+                let info = crate::task::Info::current();
+                *guard = Some((info, Backtrace::force_capture()));
+            }
+        }
+
+        Arc::increment_strong_count(ptr);
+
+        RawWaker::new(ptr, Self::waker_vtable())
+    }
+
+    /// Wake implementation that delegates to the real waker
+    unsafe fn wake_raw(ptr: *const ()) {
+        let this = Arc::from_raw(ptr as *mut Self);
+        this.real_waker.wake_by_ref();
+    }
+
+    /// Wake by reference implementation that delegates to the real waker
+    unsafe fn wake_by_ref_raw(ptr: *const ()) {
+        let this = &*(ptr as *const Self);
+        this.real_waker.wake_by_ref();
+    }
+
+    /// Drop implementation for cleaning up the waker
+    unsafe fn drop_raw(ptr: *const ()) {
+        drop(Arc::from_raw(ptr as *mut Self));
+    }
+}
 
 pub struct ForTask {
     idx: TaskId,
