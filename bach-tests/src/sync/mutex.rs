@@ -1,6 +1,5 @@
-use crate::testing::Log;
-
 use super::*;
+use crate::testing::Log;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum Event {
@@ -137,6 +136,45 @@ fn mutex_interleavings_snapshot() {
     }));
 
     insta::assert_debug_snapshot!(LOG.check());
+}
+
+#[test]
+fn mutex_owned_lock() {
+    bolero::check!().exhaustive().run(sim(|| {
+        async {
+            // Create an Arc-wrapped mutex
+            let mutex = Arc::new(Mutex::new(5));
+
+            // Use owned_lock to get an owned guard
+            let mut guard = mutex.clone().lock_owned().await;
+
+            // Test that we can access and modify the value through the guard
+            assert_eq!(*guard, 5);
+            *guard = 10;
+
+            // Spawn a task that holds the owned guard across an await point
+            async move {
+                // Wait on the channel while holding the guard
+                10.ms().sleep().await;
+
+                // Verify the guard still works after the await
+                assert_eq!(*guard, 10);
+                *guard = 15;
+
+                // Return the guard to verify the value later
+                guard
+            }
+            .spawn();
+
+            // Wait for the task to complete and get the guard back
+            let guard = mutex.lock().await;
+
+            // Verify the value was changed in the task
+            assert_eq!(*guard, 15);
+        }
+        .primary()
+        .spawn();
+    }));
 }
 
 #[test]
