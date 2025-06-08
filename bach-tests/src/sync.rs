@@ -4,6 +4,7 @@ use bach::{
 };
 use std::sync::Arc;
 
+mod mpsc;
 mod mutex;
 mod rwlock;
 mod semaphore;
