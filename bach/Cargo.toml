@@ -9,12 +9,12 @@ edition = "2021"
 
 [features]
 default = ["net"]
-coop = ["dep:tokio", "tokio/sync"]
+coop = []
 full = ["coop", "metrics", "net", "net-monitor", "tracing"]
 metrics = ["dep:metrics"]
-net = ["dep:bytes", "dep:s2n-quic-core", "dep:siphasher", "dep:tokio"]
+net = ["dep:bytes", "dep:s2n-quic-core", "dep:siphasher"]
 net-monitor = []
-tokio-compat = ["dep:tokio", "tokio/time"]
+tokio-compat = ["tokio/time"]
 tracing = ["dep:tracing"]
 
 [dependencies]
@@ -32,9 +32,7 @@ rand_xoshiro = "0.7"
 s2n-quic-core = { version = "0.59", default-features = false, optional = true }
 siphasher = { version = "1", default-features = false, optional = true }
 slotmap = "1"
-tokio = { version = "1", default-features = false, features = [
-    "sync",
-], optional = true }
+tokio = { version = "1", default-features = false, features = ["sync"] }
 tracing = { version = "0.1", optional = true }
 
 [build-dependencies]

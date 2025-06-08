@@ -1,0 +1,82 @@
+---
+source: bach-tests/src/sync/mpsc.rs
+expression: LOG.check()
+---
+[
+    Start,
+    SendStarted {
+        task: 1,
+    },
+    SendCompleted {
+        task: 1,
+    },
+    SendStarted {
+        task: 1,
+    },
+    SendCompleted {
+        task: 1,
+    },
+    SendStarted {
+        task: 1,
+    },
+    SendCompleted {
+        task: 1,
+    },
+    SendStarted {
+        task: 1,
+    },
+    SendCompleted {
+        task: 1,
+    },
+    SendStarted {
+        task: 1,
+    },
+    SendCompleted {
+        task: 1,
+    },
+    RecvStarted {
+        task: 2,
+    },
+    RecvCompleted {
+        task: 2,
+        value: Some(
+            0,
+        ),
+    },
+    RecvStarted {
+        task: 2,
+    },
+    RecvCompleted {
+        task: 2,
+        value: Some(
+            1,
+        ),
+    },
+    RecvStarted {
+        task: 2,
+    },
+    RecvCompleted {
+        task: 2,
+        value: Some(
+            2,
+        ),
+    },
+    RecvStarted {
+        task: 2,
+    },
+    RecvCompleted {
+        task: 2,
+        value: Some(
+            3,
+        ),
+    },
+    RecvStarted {
+        task: 2,
+    },
+    RecvCompleted {
+        task: 2,
+        value: Some(
+            4,
+        ),
+    },
+]
