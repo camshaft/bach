@@ -213,6 +213,142 @@ fn semaphore_interleavings_snapshot() {
 }
 
 #[test]
+fn semaphore_acquire_owned() {
+    bolero::check!().exhaustive().run(sim(|| {
+        async {
+            // Create an Arc-wrapped semaphore
+            let semaphore = Arc::new(Semaphore::new(3));
+
+            // Acquire an owned permit
+            let permit = semaphore.clone().acquire_owned().await.unwrap();
+
+            // Check permits are decreased
+            assert_eq!(semaphore.available_permits(), 2);
+
+            // Spawn a task that holds the owned permit across an await point
+            async move {
+                // Sleep while holding the permit
+                10.ms().sleep().await;
+                drop(permit);
+            }
+            .spawn();
+
+            // Wait for the task to complete
+            20.ms().sleep().await;
+
+            // Verify permit was released when the task completed
+            assert_eq!(semaphore.available_permits(), 3);
+        }
+        .primary()
+        .spawn();
+    }));
+}
+
+#[test]
+fn semaphore_try_acquire_owned() {
+    bolero::check!().exhaustive().run(sim(|| {
+        async {
+            // Create an Arc-wrapped semaphore with limited permits
+            let semaphore = Arc::new(Semaphore::new(1));
+
+            // Successfully try_acquire_owned
+            let permit = semaphore.clone().try_acquire_owned().unwrap();
+
+            // This should fail (no permits left)
+            assert!(semaphore.clone().try_acquire_owned().is_err());
+
+            // Spawn a task that holds the owned permit across an await point
+            async move {
+                // Sleep while holding the permit
+                10.ms().sleep().await;
+                drop(permit);
+            }
+            .spawn();
+
+            // Wait for the task to complete
+            11.ms().sleep().await;
+
+            // Now try_acquire_owned should succeed again
+            let _permit = semaphore.clone().try_acquire_owned().unwrap();
+        }
+        .primary()
+        .spawn();
+    }));
+}
+
+#[test]
+fn semaphore_acquire_many_owned() {
+    bolero::check!().exhaustive().run(sim(|| {
+        async {
+            // Create an Arc-wrapped semaphore
+            let semaphore = Arc::new(Semaphore::new(5));
+
+            // Acquire multiple permits at once as owned
+            let permit = semaphore.clone().acquire_many_owned(3).await.unwrap();
+
+            // Check permits are decreased correctly
+            assert_eq!(semaphore.available_permits(), 2);
+
+            // Spawn a task that holds the owned permits across an await point
+            async move {
+                // Sleep while holding the permits
+                10.ms().sleep().await;
+                drop(permit);
+            }
+            .spawn();
+
+            // Wait for the task to complete
+            20.ms().sleep().await;
+
+            // Verify permits were released when the task completed
+            assert_eq!(semaphore.available_permits(), 5);
+        }
+        .primary()
+        .spawn();
+    }));
+}
+
+#[test]
+fn semaphore_try_acquire_many_owned() {
+    bolero::check!().exhaustive().run(sim(|| {
+        async {
+            // Create an Arc-wrapped semaphore
+            let semaphore = Arc::new(Semaphore::new(5));
+
+            // Successfully try to acquire multiple owned permits
+            let permit = semaphore.clone().try_acquire_many_owned(3).unwrap();
+            assert_eq!(semaphore.available_permits(), 2);
+
+            // This should fail (not enough permits)
+            assert!(semaphore.clone().try_acquire_many_owned(3).is_err());
+
+            // But this should succeed (exactly the remaining permits)
+            let _permit2 = semaphore.clone().try_acquire_many_owned(2).unwrap();
+            assert_eq!(semaphore.available_permits(), 0);
+
+            // Spawn a task that holds some of the owned permits across an await point
+            async move {
+                // Sleep while holding the permits
+                10.ms().sleep().await;
+
+                // Drop one set of permits
+                drop(permit);
+            }
+            .spawn();
+
+            // Wait for the first set of permits to be released
+            20.ms().sleep().await;
+
+            // Should be able to acquire some permits now
+            let _permit3 = semaphore.clone().try_acquire_many_owned(3).unwrap();
+            assert_eq!(semaphore.available_permits(), 0);
+        }
+        .primary()
+        .spawn();
+    }));
+}
+
+#[test]
 #[should_panic = "Runtime stalled"]
 fn semaphore_deadlock_detection() {
     sim(|| {

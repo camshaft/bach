@@ -256,6 +256,116 @@ fn rwlock_interleavings_snapshot() {
 }
 
 #[test]
+fn rwlock_owned_read() {
+    bolero::check!().exhaustive().run(sim(|| {
+        async {
+            // Create an Arc-wrapped rwlock
+            let rwlock = Arc::new(RwLock::new(5));
+
+            // Use read_owned to get an owned read guard
+            let guard = rwlock.clone().read_owned().await;
+
+            // Test that we can access the value through the guard
+            assert_eq!(*guard, 5);
+
+            // Spawn a task that holds the owned guard across an await point
+            async move {
+                // Sleep while holding the guard
+                10.ms().sleep().await;
+
+                // Verify the guard still works after the await
+                assert_eq!(*guard, 5);
+
+                guard
+            }
+            .spawn();
+
+            // Other tasks can still read while the owned read guard is held
+            let guard = rwlock.read().await;
+            assert_eq!(*guard, 5);
+        }
+        .primary()
+        .spawn();
+    }));
+}
+
+#[test]
+fn rwlock_owned_write() {
+    bolero::check!().exhaustive().run(sim(|| {
+        async {
+            // Create an Arc-wrapped rwlock
+            let rwlock = Arc::new(RwLock::new(5));
+
+            // Use write_owned to get an owned write guard
+            let mut guard = rwlock.clone().write_owned().await;
+
+            // Test that we can modify the value through the guard
+            *guard = 10;
+            assert_eq!(*guard, 10);
+
+            // Spawn a task that holds the owned guard across an await point
+            async move {
+                // Sleep while holding the guard
+                10.ms().sleep().await;
+
+                // Verify the guard still works after the await
+                assert_eq!(*guard, 10);
+                *guard = 15;
+
+                guard
+            }
+            .spawn();
+
+            // Wait for the task to complete and verify the value was changed
+            let guard = rwlock.read().await;
+            assert_eq!(*guard, 15);
+        }
+        .primary()
+        .spawn();
+    }));
+}
+
+#[test]
+fn rwlock_try_owned_read_write() {
+    bolero::check!().exhaustive().run(sim(|| {
+        async {
+            // Create an Arc-wrapped rwlock
+            let rwlock = Arc::new(RwLock::new(5));
+
+            // Successfully try_read_owned
+            let read_guard = rwlock.clone().try_read_owned().unwrap();
+            assert_eq!(*read_guard, 5);
+
+            // Can get another read guard even while holding one
+            let another_read = rwlock.clone().try_read_owned().unwrap();
+
+            // But cannot get a write guard while read guards are held
+            assert!(rwlock.clone().try_write_owned().is_err());
+
+            // Drop read guards
+            drop(read_guard);
+            drop(another_read);
+
+            // Now try_write_owned should succeed
+            let mut write_guard = rwlock.clone().try_write_owned().unwrap();
+            *write_guard = 10;
+
+            // Cannot get a read guard while write guard is held
+            assert!(rwlock.clone().try_read_owned().is_err());
+
+            // Drop write guard
+            drop(write_guard);
+
+            // Now try_read_owned should succeed again
+            let read_guard = rwlock.clone().try_read_owned().unwrap();
+            assert_eq!(*read_guard, 10);
+        }
+        .primary()
+        .spawn();
+    }));
+}
+
+#[test]
 #[should_panic = "Runtime stalled"]
 fn rwlock_deadlock_detection() {
     sim(|| {
