@@ -18,7 +18,7 @@ tracing = ["bach/tracing"]
 [dependencies]
 bach = { path = "../bach" }
 bolero.workspace = true
-checkers = { version = "0.6", features = ["backtrace"], optional = true }
+checkers = { version = "0.7", optional = true }
 criterion = { version = "0.7", features = ["html_reports"] }
 insta = "1"
 tracing = "0.1"
