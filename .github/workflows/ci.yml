@@ -24,7 +24,7 @@ jobs:
       rust-versions: ${{ steps.definitions.outputs.versions }}
       msrv: ${{ steps.definitions.outputs.msrv }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Evaluate definitions
         id: definitions
         run: |
@@ -44,7 +44,7 @@ jobs:
   rustfmt:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install rust toolchain
         id: toolchain
@@ -59,7 +59,7 @@ jobs:
   clippy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install rust toolchain
         id: toolchain
@@ -76,7 +76,7 @@ jobs:
   udeps:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install toolchain
         id: toolchain
@@ -112,7 +112,7 @@ jobs:
             os: ubuntu-latest
             features: default,leaks
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           lfs: true
 
@@ -139,7 +139,7 @@ jobs:
       matrix:
         crate: [bach]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install toolchain
         id: toolchain
@@ -161,7 +161,7 @@ jobs:
   wasm:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install toolchain
         id: toolchain
@@ -197,7 +197,7 @@ jobs:
       matrix:
         crate: [bach]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Kani run
         uses: model-checking/kani-github-action@v1.1
@@ -212,9 +212,9 @@ jobs:
         repo: ["aws/s2n-quic"]
 
     steps:
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5
 
-      - uses: actions/checkout@v4.2.2
+      - uses: actions/checkout@v5
         with:
           repository: ${{ matrix.repo }}
           path: "target/integration/${{ matrix.repo }}"
