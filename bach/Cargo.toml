@@ -35,9 +35,6 @@ slotmap = "1"
 tokio = { version = "1", default-features = false, features = ["sync"] }
 tracing = { version = "0.1", optional = true }
 
-[build-dependencies]
-autocfg = "1"
-
 [dev-dependencies]
 bolero.workspace = true
 bytes = "1"

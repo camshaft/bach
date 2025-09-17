@@ -1,3 +1,4 @@
+use super::WakerId;
 use core::task::Waker;
 use std::collections::{btree_map::Entry, BTreeMap};
 
@@ -9,7 +10,7 @@ pub struct DisjointSet {
     /// A mapping of operation IDs to internal indices
     operation_to_idx: BTreeMap<u64, Idx>,
     /// A mapping of waker `data` pointers to internal indices
-    waker_to_idx: BTreeMap<usize, Idx>,
+    waker_to_idx: BTreeMap<WakerId, Idx>,
     /// A cached mapping of root indices to lists of wakers that belong to that
     /// root
     root_to_result_id: BTreeMap<Idx, Vec<Waker>>,
@@ -24,7 +25,7 @@ impl DisjointSet {
     /// This will merge any other wakers that are also interested in that operation
     /// into the same scheduling group.
     #[inline]
-    pub fn join(&mut self, waker: &Waker, waker_id: usize, operation: u64) {
+    pub fn join(&mut self, waker: &Waker, waker_id: WakerId, operation: u64) {
         // insert the operation first so it has a smaller index, which will result
         // in a more shallow tree
         let op_idx = match self.operation_to_idx.entry(operation) {
@@ -44,19 +45,6 @@ impl DisjointSet {
                 idx
             }
         };
-
-        #[cfg(not(feature_waker_data))]
-        {
-            if let Some(prev) = self.inner.slot(op_idx).waker.as_ref() {
-                assert!(
-                    prev.will_wake(waker),
-                    concat!(
-                        "Different waker being used in the same task. To prevent this issue\n",
-                        "use a rust version of at least 1.83.0."
-                    )
-                );
-            }
-        }
 
         self.inner.join(op_idx, actor_idx);
     }
@@ -321,7 +309,7 @@ mod tests {
                     }))
                 });
 
-                set.join(waker, waker_id as _, operation as u64);
+                set.join(waker, (waker_id as _, 0), operation as u64);
             }
 
             let sets = set.sets();

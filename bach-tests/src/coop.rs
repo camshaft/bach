@@ -1,10 +1,19 @@
 use crate::testing::Log;
-use bach::{environment::default::Runtime, ext::*, queue::vec_deque::Queue};
+use bach::{environment::default::Runtime, ext::*, queue::vec_deque::Queue, sync::channel};
+use futures::stream::{FuturesUnordered, StreamExt as _};
+
+fn new_channel<T: 'static + Send>() -> (channel::Sender<T>, channel::Receiver<T>) {
+    Queue::builder()
+        .with_capacity(Some(10))
+        .build()
+        .mutex()
+        .channel()
+}
 
 pub fn sim(f: impl Fn()) -> impl Fn() {
     crate::testing::init_tracing();
     move || {
-        let mut rt = Runtime::new().with_coop(true).with_rand(None);
+        let mut rt = Runtime::new().with_coop(true);
         rt.run(&f);
     }
 }
@@ -37,11 +46,7 @@ fn interleavings() {
         LOG.push(Event::Start);
 
         for group in 0..2 {
-            let (sender, mut receiver) = Queue::builder()
-                .with_capacity(Some(20))
-                .build()
-                .mutex()
-                .channel();
+            let (sender, mut receiver) = new_channel();
 
             async move {
                 while let Ok((sender_group, sender_id)) = receiver.pop().await {
@@ -81,11 +86,7 @@ fn joined_interleavings() {
         LOG.push(Event::Start);
         eprintln!("start");
 
-        let (sender, receiver) = Queue::builder()
-            .with_capacity(Some(20))
-            .build()
-            .mutex()
-            .channel();
+        let (sender, receiver) = new_channel();
 
         for group in 0..2 {
             let mut receiver = receiver.clone();
@@ -117,4 +118,48 @@ fn joined_interleavings() {
     }));
 
     insta::assert_debug_snapshot!(LOG.check());
+}
+
+#[test]
+fn futures_unordered() {
+    bolero::check!().exhaustive().run(sim(|| {
+        let (accept, mut acceptor) = new_channel::<channel::Sender<()>>();
+
+        async move {
+            while let Ok(mut response) = acceptor.recv().await {
+                dbg!();
+                response.send(()).await.unwrap();
+            }
+        }
+        .spawn();
+
+        async move {
+            let mut requests = FuturesUnordered::new();
+            let count = 2;
+
+            for idx in 0..count {
+                let (send_response, mut read_response) = new_channel::<()>();
+                let mut accept = accept.clone();
+                requests.push(async move {
+                    dbg!(idx);
+                    accept.send(send_response).await.unwrap();
+                    read_response.recv().await.unwrap();
+                    idx
+                });
+            }
+
+            let mut completed = vec![false; count];
+
+            while !requests.is_empty() {
+                if let Some(index) = requests.next().await {
+                    dbg!(index);
+                    completed[index] = true;
+                }
+            }
+
+            assert!(completed.iter().all(|v| *v));
+        }
+        .primary()
+        .spawn();
+    }));
 }

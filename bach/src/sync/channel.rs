@@ -222,7 +222,7 @@ impl<T> Sender<T> {
     ) -> Poll<Result<(), PushError>> {
         ready!(self.channel.send_resource.poll_acquire(cx));
 
-        let mut p = Push::_new(PushInner {
+        let p = Push::_new(PushInner {
             sender: self,
             msg,
             _pin: PhantomPinned,
@@ -376,7 +376,7 @@ impl<T> Receiver<T> {
     pub fn poll_pop(&mut self, cx: &mut Context) -> Poll<Result<T, PopError>> {
         ready!(self.channel.recv_resource.poll_acquire(cx));
 
-        let mut p = Pop::_new(PopInner {
+        let p = Pop::_new(PopInner {
             receiver: self,
             _pin: PhantomPinned,
         });
