@@ -96,8 +96,19 @@ impl<E: Environment> Executor<E> {
         self.environment.on_microsteps(runner);
 
         if !is_ok {
+            let supervisor = &mut self.supervisor;
+            let tasks = self.environment.enter(|_| supervisor.diagnostics());
+
+            let primary_count = self.handle.primary_count();
+            let groups = crate::group::list();
+
+            let snapshot = Snapshot {
+                primary_count,
+                groups,
+                tasks,
+            };
             panic!(
-                "\nTask contract violation.\n\n{}{}{}",
+                "\nTask contract violation.\n\n{}{}{}\n\n{}",
                 "The runtime has exceeded the configured `max_microsteps` limit of ",
                 self.max_microsteps.unwrap(),
                 concat!(
@@ -105,7 +116,8 @@ impl<E: Environment> Executor<E> {
                     "moving forward by continually waking tasks. Enable the `tracing` and ",
                     "`metrics` feature in `bach` to identify which ",
                     "task(s) are causing this issue."
-                )
+                ),
+                snapshot
             );
         }
 
@@ -128,7 +140,8 @@ impl<E: Environment> Executor<E> {
         if macrostep.stalled {
             let primary_count = self.handle.primary_count();
             let groups = crate::group::list();
-            let tasks = self.supervisor.diagnostics();
+            let supervisor = &mut self.supervisor;
+            let tasks = self.environment.enter(|_| supervisor.diagnostics());
             let snapshot = Snapshot {
                 primary_count,
                 groups,

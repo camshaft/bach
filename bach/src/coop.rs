@@ -3,31 +3,12 @@ use std::{
     collections::{btree_map::Entry, BTreeMap},
     future::poll_fn,
     sync::{Arc, Mutex},
-    task::{ready, Context, Poll, Waker},
+    task::{ready, Context, Poll},
 };
 
 define!(scope, Coop);
 
-trait WakerExt {
-    fn id(&self) -> usize;
-}
-
-impl WakerExt for Waker {
-    fn id(&self) -> usize {
-        #[cfg(feature_waker_data)]
-        {
-            self.data() as usize
-        }
-        #[cfg(not(feature_waker_data))]
-        {
-            // Use the task ID instead of the waker pointer.
-            // This may lead to issues when the same task is using different wakers
-            // but should be rare. The `DisjointSet` impl has checks to prevent the
-            // execution from continuing so it should be safe.
-            crate::task::Info::current().id() as _
-        }
-    }
-}
+type WakerId = (usize, usize);
 
 mod disjoint_set;
 
@@ -38,7 +19,7 @@ pub struct Coop(Arc<Mutex<State>>);
 struct State {
     id: u64,
     set: disjoint_set::DisjointSet,
-    status: BTreeMap<(usize, Operation), Poll<()>>,
+    status: BTreeMap<(WakerId, Operation), Poll<()>>,
     moves: Vec<usize>,
 }
 
@@ -100,7 +81,7 @@ impl State {
     fn poll_acquire(&mut self, cx: &mut Context, operation: Operation) -> Poll<()> {
         let waker = cx.waker();
 
-        let waker_id = waker.id();
+        let waker_id = (waker.data() as usize, waker.vtable() as *const _ as usize);
 
         let key = (waker_id, operation);
         match self.status.entry(key) {

@@ -135,14 +135,14 @@ impl List {
 
     #[cfg(feature = "net-monitor")]
     #[inline(always)]
-    fn lock(&self) -> Option<sync::MutexGuard<Inner>> {
+    fn lock(&self) -> Option<sync::MutexGuard<'_, Inner>> {
         let inner = self.monitors.as_ref()?;
         inner.lock().ok()
     }
 
     #[cfg(not(feature = "net-monitor"))]
     #[inline(always)]
-    fn lock(&self) -> Option<sync::MutexGuard<Inner>> {
+    fn lock(&self) -> Option<sync::MutexGuard<'_, Inner>> {
         None
     }
 }
