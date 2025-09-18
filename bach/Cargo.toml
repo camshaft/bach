@@ -1,11 +1,12 @@
 [package]
 name = "bach"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Cameron Bytheway <bytheway.cameron@gmail.com>"]
 description = "Discrete-event simulation environment for async workflows"
 repository = "https://github.com/camshaft/bach"
 license = "MIT"
 edition = "2021"
+rust-version = "1.83"
 
 [features]
 default = ["net"]
