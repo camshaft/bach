@@ -1,16 +1,34 @@
 use super::Macrostep;
-use crate::{coop::Coop, environment::Environment as _, executor, rand, time::scheduler};
+use crate::{
+    coop::Coop,
+    environment::{Environment as _, Runner},
+    executor, rand,
+    task::supervisor::RunOutcome,
+    time::scheduler,
+};
 use std::time::Duration;
 
 #[cfg(feature = "net")]
 use crate::environment::net;
 
-pub struct Runtime {
-    inner: executor::Executor<Environment>,
+pub struct Runtime<R: Runner = DefaultRunner> {
+    inner: executor::Executor<Environment<R>>,
 }
 
-impl Default for Runtime {
+impl<R: Runner + Default> Default for Runtime<R> {
     fn default() -> Self {
+        Self::new_with_runner(Default::default())
+    }
+}
+
+impl Runtime<DefaultRunner> {
+    pub fn new() -> Self {
+        Self::new_with_runner(DefaultRunner::default())
+    }
+}
+
+impl<R: Runner> Runtime<R> {
+    pub fn new_with_runner(runner: R) -> Self {
         let inner = executor::Executor::new(|handle| Environment {
             handle: handle.clone(),
             time: scheduler::Scheduler::new(),
@@ -20,15 +38,10 @@ impl Default for Runtime {
             coop_enabled: false,
             #[cfg(feature = "net")]
             net: Some(Default::default()),
+            runner,
         });
 
         Self { inner }
-    }
-}
-
-impl Runtime {
-    pub fn new() -> Self {
-        Self::default()
     }
 
     pub fn with_seed(self, seed: u64) -> Self {
@@ -45,8 +58,8 @@ impl Runtime {
         self
     }
 
-    pub fn run<F: FnOnce() -> R, R>(&mut self, f: F) -> R {
-        let result = self.inner.environment().enter(|_| f());
+    pub fn run<F: FnOnce() -> Res, Res>(&mut self, f: F) -> Res {
+        let result = self.inner.environment().enter(|_, _| f());
 
         self.inner.block_on_primary();
 
@@ -70,7 +83,7 @@ impl Runtime {
 }
 
 #[cfg(feature = "net")]
-impl Runtime {
+impl<R: Runner> Runtime<R> {
     pub fn with_net_queues(mut self, net: Option<Box<dyn net::queue::Allocator>>) -> Self {
         if let Some(queue) = net {
             let net = &mut self.inner.environment().net;
@@ -107,13 +120,13 @@ impl Runtime {
     }
 }
 
-impl Drop for Runtime {
+impl<R: Runner> Drop for Runtime<R> {
     fn drop(&mut self) {
         self.inner.close();
     }
 }
 
-pub struct Environment {
+pub struct Environment<Runner> {
     handle: executor::Handle,
     time: scheduler::Scheduler,
     rand: Option<rand::Scope>,
@@ -122,9 +135,10 @@ pub struct Environment {
     coop_enabled: bool,
     #[cfg(feature = "net")]
     net: Option<Box<net::registry::Registry>>,
+    runner: Runner,
 }
 
-impl Environment {
+impl<R: Runner> Environment<R> {
     fn close<F: FnOnce()>(&mut self, f: F) {
         let f = {
             #[cfg(not(feature = "coop"))]
@@ -191,8 +205,10 @@ impl Environment {
     }
 }
 
-impl super::Environment for Environment {
-    fn enter<F: FnOnce(u64) -> O, O>(&mut self, f: F) -> O {
+impl<R: Runner> super::Environment for Environment<R> {
+    type Runner = R;
+
+    fn enter<'a, F: FnOnce(u64, &'a Self::Runner) -> O, O>(&'a mut self, f: F) -> O {
         let f = {
             #[cfg(not(feature = "coop"))]
             {
@@ -203,11 +219,11 @@ impl super::Environment for Environment {
             {
                 let enabled = self.coop_enabled;
                 let coop = &mut self.coop;
-                move |ticks| {
+                move |ticks, runner| {
                     if enabled {
-                        coop.enter(|| f(ticks))
+                        coop.enter(|| f(ticks, runner))
                     } else {
-                        f(ticks)
+                        f(ticks, runner)
                     }
                 }
             }
@@ -222,26 +238,29 @@ impl super::Environment for Environment {
             #[cfg(feature = "net")]
             {
                 let net = &mut self.net;
-                move |ticks| {
+                move |ticks, runner| {
                     if let Some(v) = net.take() {
-                        let (v, res) = net::registry::scope::with(v, || f(ticks));
+                        let (v, res) = net::registry::scope::with(v, || f(ticks, runner));
                         *net = Some(v);
                         res
                     } else {
-                        f(ticks)
+                        f(ticks, runner)
                     }
                 }
             }
         };
 
         let rand = self.rand.as_mut();
-        let f = move |ticks| {
+        let f = move |ticks, runner| {
             if let Some(rand) = rand {
-                rand.enter(|| f(ticks))
+                rand.enter(|| f(ticks, runner))
             } else {
-                f(ticks)
+                f(ticks, runner)
             }
         };
+
+        let runner = &self.runner;
+        let f = move |ticks| f(ticks, runner);
 
         self.handle.enter(|| self.time.enter(f))
     }
@@ -310,5 +329,18 @@ impl super::Environment for Environment {
         F: 'static + FnOnce() + Send,
     {
         Self::close(self, close)
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+pub struct DefaultRunner(());
+
+impl Runner for DefaultRunner {
+    fn run(
+        &self,
+        f: &mut crate::task::supervisor::DynRunnable,
+        cx: &mut core::task::Context<'_>,
+    ) -> RunOutcome {
+        f.as_mut().poll(cx)
     }
 }

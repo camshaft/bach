@@ -4,14 +4,10 @@ use super::{
     supervisor::{Event, Events, Runnable, TaskId},
     JoinHandle,
 };
-use crate::sync::queue::Shared;
+use crate::{sync::queue::Shared, task::supervisor::RunOutcome};
 use core::future::Future;
 use pin_project_lite::pin_project;
-use std::{
-    pin::Pin,
-    sync::Arc,
-    task::{ready, Context, Poll},
-};
+use std::{pin::Pin, sync::Arc, task::Context};
 
 pub fn event<F>(events: &Events, future: WithInfo<F>) -> JoinHandle<F::Output>
 where
@@ -53,13 +49,22 @@ where
         this.output.set_id(id);
     }
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<()> {
+    fn record_cost(self: Pin<&mut Self>, cost: core::time::Duration) {
+        self.project().future.record_cost(cost);
+    }
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> RunOutcome {
         let this = self.project();
         if !this.output.status().is_running() {
-            return Poll::Ready(());
+            return RunOutcome::Done(());
         }
-        let value = ready!(this.future.poll(cx));
-        this.output.finish(Some(value));
-        Poll::Ready(())
+        match this.future.poll(cx) {
+            RunOutcome::Done(value) => {
+                this.output.finish(Some(value));
+                RunOutcome::Done(())
+            }
+            RunOutcome::PayingDebt => RunOutcome::PayingDebt,
+            RunOutcome::ExecutedApplication => RunOutcome::ExecutedApplication,
+        }
     }
 }

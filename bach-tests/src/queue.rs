@@ -106,3 +106,44 @@ fn latent_queue() {
     assert_eq!(RECV_COUNT.load(Ordering::Relaxed), COUNT);
     assert_eq!(elapsed, 20.ms());
 }
+
+#[test]
+fn latent_queue_cost_modeling() {
+    static RECV_COUNT: AtomicU64 = AtomicU64::new(0);
+    const COUNT: u64 = 10;
+
+    let elapsed = run(|| {
+        let (mut sender, mut receiver) = Queue::builder()
+            .with_capacity(Some(20))
+            .build()
+            .latent(10.ms())
+            .sojourn()
+            .span("channel")
+            .mutex()
+            .channel();
+
+        async move {
+            for idx in 0..COUNT {
+                // record cost instead of sleeping
+                bach::cost::record(1.ms());
+                sender.send(idx).await.unwrap();
+            }
+        }
+        .primary()
+        .group("client")
+        .spawn_named("client");
+
+        async move {
+            while let Ok(idx) = receiver.pop().await {
+                dbg!(idx);
+                RECV_COUNT.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+        .primary()
+        .group("server")
+        .spawn_named("server");
+    });
+
+    assert_eq!(RECV_COUNT.load(Ordering::Relaxed), COUNT);
+    assert_eq!(elapsed, 20.ms());
+}

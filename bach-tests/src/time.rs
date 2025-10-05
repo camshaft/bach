@@ -146,3 +146,103 @@ impl Pacer {
         Poll::Pending
     }
 }
+
+#[test]
+fn cost_modeling() {
+    for _ in 0..2 {
+        sim(|| {
+            async {
+                let before = Instant::now();
+                assert_eq!(before.elapsed_since_start(), 0.ms());
+                bach::cost::record(1.ms());
+                let after = Instant::now();
+                assert_eq!(after.saturating_duration_since(before), 1.ms());
+
+                let before = Instant::now();
+                bach::cost::record(1.ms());
+                1.ms().sleep().await;
+                let after = Instant::now();
+                assert_eq!(after.saturating_duration_since(before), 2.ms());
+            }
+            .primary()
+            .spawn();
+        })
+    }
+}
+
+#[test]
+fn multi_task_cost_modeling() {
+    sim(|| {
+        for group in 0..2 {
+            let group = format!("group-{group}");
+
+            async {
+                let before = Instant::now();
+                1.ms().sleep().await;
+                let after = Instant::now();
+                assert_eq!(
+                    after.saturating_duration_since(before),
+                    2.ms(),
+                    "the cost of the first task should be increased by the second"
+                );
+            }
+            .primary()
+            .group(&group)
+            .spawn();
+
+            async {
+                let before = Instant::now();
+                bach::cost::record(1.ms());
+                let after = Instant::now();
+                assert_eq!(after.saturating_duration_since(before), 1.ms());
+
+                let before = Instant::now();
+                bach::cost::record(1.ms());
+                1.ms().sleep().await;
+                let after = Instant::now();
+                assert_eq!(after.saturating_duration_since(before), 2.ms());
+            }
+            .primary()
+            .group(&group)
+            .spawn();
+        }
+    })
+}
+
+#[test]
+fn cost_modeling_spawn_inherit() {
+    sim(|| {
+        async {
+            bach::cost::record(1.ms());
+
+            async {
+                assert_eq!(Instant::now().elapsed_since_start(), 2.ms());
+            }
+            .spawn()
+            .primary();
+
+            // record additional cost post-spawn to show that the child pays additional costs
+            bach::cost::record(1.ms());
+        }
+        .primary()
+        .group("group")
+        .spawn();
+    })
+}
+
+#[test]
+fn timed_runner() {
+    let runner = bach::environment::TimedRunner::default();
+    let mut rt = bach::environment::default::Runtime::new_with_runner(runner);
+    rt.run(|| {
+        async {
+            let before = Instant::now();
+            std::thread::sleep(101.ms());
+            bach::task::yield_now().await;
+            let after = Instant::now();
+            assert!(after.saturating_duration_since(before) >= 100.ms());
+        }
+        .primary()
+        .spawn()
+    });
+}

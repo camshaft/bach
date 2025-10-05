@@ -12,10 +12,15 @@ thread_local! {
     static GROUPS: RefCell<Groups> = RefCell::new(Groups::default());
 }
 
+fn with<R>(f: impl FnOnce(&mut Groups) -> R) -> R {
+    GROUPS.with(|groups| f(&mut groups.borrow_mut()))
+}
+
 #[derive(Default)]
 struct Groups {
     name_to_id: HashMap<String, u64>,
-    id_to_name: HashMap<u64, String>,
+    id_to_name: Vec<String>,
+    id_to_tick_watermark: Vec<u64>,
 }
 
 impl Groups {
@@ -33,19 +38,20 @@ impl Groups {
         });
 
         self.name_to_id.insert(name.to_owned(), id);
-        self.id_to_name.insert(id, name.to_owned());
+        self.id_to_name.push(name.to_owned());
+        self.id_to_tick_watermark.push(0);
 
         id
     }
 }
 
 pub(crate) fn list() -> Vec<Group> {
-    GROUPS.with(|groups| {
-        let groups = groups.borrow();
+    with(|groups| {
         groups
             .id_to_name
-            .keys()
-            .map(|id| Group { id: *id })
+            .iter()
+            .enumerate()
+            .map(|(id, _)| Group { id: id as _ })
             .collect()
     })
 }
@@ -55,6 +61,12 @@ crate::scope::define!(listener, fn(u64, &str));
 
 pub fn current() -> Group {
     scope::try_borrow_with(|scope| scope.unwrap_or_else(|| Group::new("main")))
+}
+
+pub(crate) fn reset() {
+    with(|groups| {
+        groups.id_to_tick_watermark.fill(0);
+    });
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -67,9 +79,8 @@ impl fmt::Debug for Group {
         let mut f = f.debug_struct("Group");
         f.field("id", &self.id);
 
-        GROUPS.with(|groups| {
-            let groups = groups.borrow();
-            if let Some(name) = groups.id_to_name.get(&self.id) {
+        with(|groups| {
+            if let Some(name) = groups.id_to_name.get(self.id as usize) {
                 f.field("name", name);
             }
         });
@@ -80,18 +91,21 @@ impl fmt::Debug for Group {
 
 impl fmt::Display for Group {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        GROUPS.with(|groups| groups.borrow().id_to_name.get(&self.id).unwrap().fmt(f))
+        with(|groups| groups.id_to_name.get(self.id as usize).unwrap().fmt(f))
     }
 }
 
 impl Group {
     pub fn new(name: &str) -> Self {
-        GROUPS.with(|groups| {
-            let mut groups = groups.borrow_mut();
+        with(|groups| {
             let id = groups.name_to_id(name);
 
             Self { id }
         })
+    }
+
+    pub fn current() -> Self {
+        current()
     }
 
     pub fn id(&self) -> u64 {
@@ -100,6 +114,24 @@ impl Group {
 
     pub fn name(&self) -> String {
         self.to_string()
+    }
+
+    pub(crate) fn tick_watermark(&self) -> u64 {
+        with(|groups| {
+            groups
+                .id_to_tick_watermark
+                .get(self.id as usize)
+                .copied()
+                .unwrap_or(0)
+        })
+    }
+
+    pub(crate) fn with_tick_watermark(&self, f: impl FnOnce(&mut u64)) {
+        with(|groups| {
+            let id = self.id as usize;
+            let ticks = &mut groups.id_to_tick_watermark[id];
+            f(ticks);
+        })
     }
 }
 
@@ -123,12 +155,17 @@ pin_project! {
         #[pin]
         inner: Inner,
         group: Group,
+        first: bool,
     }
 }
 
 impl<Inner> Grouped<Inner> {
     pub fn new(inner: Inner, group: Group) -> Self {
-        Self { inner, group }
+        Self {
+            inner,
+            group,
+            first: true,
+        }
     }
 }
 
@@ -140,6 +177,16 @@ where
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
+
+        // if this is the first time polling the future then set the group on the task info
+        if core::mem::take(this.first) {
+            crate::task::info::scope::try_borrow_mut_with(|info| {
+                if let Some(info) = info {
+                    info.group = *this.group;
+                }
+            });
+        }
+
         let inner = this.inner;
         let group = this.group;
         let span = info_span!("group", %group);
