@@ -30,7 +30,7 @@ pin-project-lite = "0.2"
 metrics = { version = "0.24", optional = true }
 rand = { version = "0.9", default-features = false }
 rand_xoshiro = "0.7"
-s2n-quic-core = { version = "0.63", default-features = false, optional = true }
+s2n-quic-core = { version = "0.66", default-features = false, optional = true }
 siphasher = { version = "1", default-features = false, optional = true }
 slotmap = "1"
 tokio = { version = "1", default-features = false, features = ["sync"] }
@@ -39,7 +39,7 @@ tracing = { version = "0.1", optional = true }
 [dev-dependencies]
 bolero.workspace = true
 bytes = "1"
-pcap-parser = "0.16"
+pcap-parser = "0.17"
 tokio = { version = "1", default-features = false, features = ["sync"] }
 
 [lints.rust.unexpected_cfgs]

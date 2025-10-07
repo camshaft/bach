@@ -55,6 +55,12 @@ pub trait Event: Clone + core::fmt::Debug + Eq + core::hash::Hash {
 
 pub struct Log<T>(Mutex<Vec<T>>);
 
+impl<T: Event> Default for Log<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T: Event> Log<T> {
     pub const fn new() -> Self {
         Self(Mutex::new(Vec::new()))
