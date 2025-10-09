@@ -21,10 +21,7 @@ pub(crate) fn with_registry<F: FnOnce(&mut Registry) -> io::Result<R>, R>(f: F) 
         if let Some(registry) = registry {
             f(registry)
         } else {
-            Err(io::Error::new(
-                io::ErrorKind::Other,
-                "No net registry in scope",
-            ))
+            Err(io::Error::other("No net registry in scope"))
         }
     })
 }

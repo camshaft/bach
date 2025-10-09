@@ -215,7 +215,7 @@ mod monitors {
         sim(|| {
             monitor::on_socket_write(|write| {
                 info!(?write, "socket_write");
-                Err(io::Error::new(io::ErrorKind::Other, "SOCKET_WRITE_FAIL"))
+                Err(io::Error::other("SOCKET_WRITE_FAIL"))
             });
 
             udp_ping_pong();
@@ -228,7 +228,7 @@ mod monitors {
         sim(|| {
             monitor::on_socket_read(|read| {
                 info!(?read, "socket_read");
-                Err(io::Error::new(io::ErrorKind::Other, "SOCKET_READ_FAIL"))
+                Err(io::Error::other("SOCKET_READ_FAIL"))
             });
 
             udp_ping_pong();

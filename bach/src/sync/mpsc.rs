@@ -145,7 +145,7 @@ mod coop_impl {
         fn clone(&self) -> Self {
             Self {
                 inner: self.inner.clone(),
-                send_op: self.send_op.clone(),
+                send_op: self.send_op,
             }
         }
     }
@@ -202,7 +202,7 @@ mod coop_impl {
         pub fn downgrade(&self) -> WeakUnboundedSender<T> {
             WeakUnboundedSender {
                 inner: self.inner.downgrade(),
-                send_op: self.send_op.clone(),
+                send_op: self.send_op,
             }
         }
     }
@@ -211,7 +211,7 @@ mod coop_impl {
         fn clone(&self) -> Self {
             Self {
                 inner: self.inner.clone(),
-                send_op: self.send_op.clone(),
+                send_op: self.send_op,
             }
         }
     }
@@ -274,7 +274,7 @@ mod coop_impl {
         pub fn upgrade(&self) -> Option<Sender<T>> {
             self.inner.upgrade().map(|inner| Sender {
                 inner,
-                send_op: self.send_op.clone(),
+                send_op: self.send_op,
             })
         }
     }
@@ -283,7 +283,7 @@ mod coop_impl {
         fn clone(&self) -> Self {
             Self {
                 inner: self.inner.clone(),
-                send_op: self.send_op.clone(),
+                send_op: self.send_op,
             }
         }
     }
@@ -293,7 +293,7 @@ mod coop_impl {
         pub fn upgrade(&self) -> Option<UnboundedSender<T>> {
             self.inner.upgrade().map(|inner| UnboundedSender {
                 inner,
-                send_op: self.send_op.clone(),
+                send_op: self.send_op,
             })
         }
     }
@@ -302,7 +302,7 @@ mod coop_impl {
         fn clone(&self) -> Self {
             Self {
                 inner: self.inner.clone(),
-                send_op: self.send_op.clone(),
+                send_op: self.send_op,
             }
         }
     }

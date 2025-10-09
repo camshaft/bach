@@ -177,7 +177,7 @@ mod coop_impl {
         type Target = T;
 
         fn deref(&self) -> &Self::Target {
-            &*self.guard
+            &self.guard
         }
     }
 
@@ -190,13 +190,13 @@ mod coop_impl {
         type Target = T;
 
         fn deref(&self) -> &Self::Target {
-            &*self.guard
+            &self.guard
         }
     }
 
     impl<'a, T: ?Sized> std::ops::DerefMut for RwLockWriteGuard<'a, T> {
         fn deref_mut(&mut self) -> &mut Self::Target {
-            &mut *self.guard
+            &mut self.guard
         }
     }
 
@@ -209,7 +209,7 @@ mod coop_impl {
         type Target = T;
 
         fn deref(&self) -> &Self::Target {
-            &*self.guard
+            &self.guard
         }
     }
 
@@ -222,13 +222,13 @@ mod coop_impl {
         type Target = T;
 
         fn deref(&self) -> &Self::Target {
-            &*self.guard
+            &self.guard
         }
     }
 
     impl<T: ?Sized> std::ops::DerefMut for OwnedRwLockWriteGuard<T> {
         fn deref_mut(&mut self) -> &mut Self::Target {
-            &mut *self.guard
+            &mut self.guard
         }
     }
 }
