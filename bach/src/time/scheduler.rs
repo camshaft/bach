@@ -146,6 +146,12 @@ impl Handle {
         super::Instant::from_ticks(ticks)
     }
 
+    /// Returns the current time for the scheduler with additional ticks
+    pub fn now_with(&self, additional: u64) -> super::Instant {
+        let ticks = self.ticks();
+        super::Instant::from_ticks(ticks + additional)
+    }
+
     fn advance(&self, ticks: u64) {
         if cfg!(test) {
             self.0

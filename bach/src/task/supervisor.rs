@@ -1,5 +1,6 @@
 use super::waker;
 use crate::{
+    environment::Runner,
     queue::{self, QueueExt as _},
     task,
 };
@@ -41,11 +42,36 @@ impl fmt::Debug for Event {
 }
 
 pub trait Runnable: 'static + Send {
+    /// Returns the type name of the task future
     fn type_name(&self) -> &'static str;
 
+    #[doc(hidden)]
     fn set_id(self: Pin<&mut Self>, task_id: TaskId);
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<()>;
+    /// Records a cost associated with polling the task
+    fn record_cost(self: Pin<&mut Self>, cost: core::time::Duration);
+
+    /// Polls the task to make progress
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> RunOutcome;
+}
+
+pub enum RunOutcome<T = ()> {
+    /// The task is paying recorded costs
+    PayingDebt,
+    /// The task executed application code but is pending
+    ExecutedApplication,
+    /// The task is done executing
+    Done(T),
+}
+
+impl<T> From<RunOutcome<T>> for Poll<T> {
+    fn from(value: RunOutcome<T>) -> Self {
+        match value {
+            RunOutcome::PayingDebt => Poll::Pending,
+            RunOutcome::ExecutedApplication => Poll::Pending,
+            RunOutcome::Done(value) => Poll::Ready(value),
+        }
+    }
 }
 
 new_key_type! {
@@ -90,8 +116,8 @@ impl Supervisor {
         self.0.events.clone()
     }
 
-    pub fn microstep(&mut self, current_tick: u64) -> usize {
-        self.0.microstep(current_tick)
+    pub fn microstep(&mut self, current_tick: u64, runner: &impl Runner) -> usize {
+        self.0.microstep(current_tick, runner)
     }
 
     /// Collect diagnostic information about all tasks
@@ -127,7 +153,7 @@ impl Inner {
         diagnostics
     }
 
-    fn microstep(&mut self, current_tick: u64) -> usize {
+    fn microstep(&mut self, current_tick: u64, runner: &impl Runner) -> usize {
         let mut count = 0;
         let Ok(mut guard) = self.events.lock() else {
             return count;
@@ -162,7 +188,7 @@ impl Inner {
                         let Some(slot) = self.tasks.get_mut(task_id) else {
                             break;
                         };
-                        let res = slot.poll(current_tick, &self.max_self_wakes);
+                        let res = slot.poll(current_tick, runner, &self.max_self_wakes);
                         if res.is_ready() {
                             self.tasks.remove(task_id);
                             self.task_counts.fetch_sub(1, Ordering::Relaxed);
@@ -224,11 +250,17 @@ struct Slot {
 }
 
 impl Slot {
-    fn poll(&mut self, current_tick: u64, max_self_wakes: &Option<usize>) -> Poll<()> {
+    fn poll(
+        &mut self,
+        current_tick: u64,
+        runner: &impl Runner,
+        max_self_wakes: &Option<usize>,
+    ) -> Poll<()> {
         self.waker_state.before_poll();
 
         let cx = &mut Context::from_waker(&self.waker);
-        let res = self.runnable.as_mut().poll(cx);
+        let res = runner.run(&mut self.runnable, cx);
+        let res: Poll<_> = res.into();
 
         // check that the task contract is enforced
         if cfg!(debug_assertions) && res.is_pending() {

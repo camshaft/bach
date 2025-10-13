@@ -1,3 +1,4 @@
+use bach::time::Instant;
 use std::{collections::HashMap, sync::Mutex};
 
 pub fn init_tracing() {
@@ -25,9 +26,7 @@ pub fn init_tracing() {
                 &self,
                 w: &mut tracing_subscriber::fmt::format::Writer<'_>,
             ) -> std::fmt::Result {
-                let now =
-                    bach::time::scheduler::scope::try_borrow_mut_with(|s| Some(s.as_ref()?.now()));
-                if let Some(now) = now {
+                if let Some(now) = Instant::try_now() {
                     write!(w, "{now}")
                 } else {
                     write!(w, "[UNKNOWN]")

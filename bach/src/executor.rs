@@ -21,6 +21,9 @@ pub struct Executor<E: Environment> {
 
 impl<E: Environment> Executor<E> {
     pub fn new<F: FnOnce(&Handle) -> E>(create_env: F) -> Self {
+        // clear out any group state from a previous run
+        crate::group::reset();
+
         let supervisor = Supervisor::default();
 
         let handle = Handle {
@@ -58,7 +61,7 @@ impl<E: Environment> Executor<E> {
 
     pub fn microstep(&mut self) -> usize {
         self.environment
-            .enter(|current_ticks| self.supervisor.microstep(current_ticks))
+            .enter(|current_ticks, runner| self.supervisor.microstep(current_ticks, runner))
     }
 
     pub fn macrostep(&mut self) -> Macrostep {
@@ -71,8 +74,8 @@ impl<E: Environment> Executor<E> {
 
         let mut is_ok = true;
 
-        let runner = |current_tick| {
-            let tasks = self.supervisor.microstep(current_tick);
+        let runner = |current_tick, runner| {
+            let tasks = self.supervisor.microstep(current_tick, runner);
 
             // all of the pending tasks have settled
             if tasks == 0 {
@@ -97,7 +100,7 @@ impl<E: Environment> Executor<E> {
 
         if !is_ok {
             let supervisor = &mut self.supervisor;
-            let tasks = self.environment.enter(|_| supervisor.diagnostics());
+            let tasks = self.environment.enter(|_, _| supervisor.diagnostics());
 
             let primary_count = self.handle.primary_count();
             let groups = crate::group::list();
@@ -141,7 +144,7 @@ impl<E: Environment> Executor<E> {
             let primary_count = self.handle.primary_count();
             let groups = crate::group::list();
             let supervisor = &mut self.supervisor;
-            let tasks = self.environment.enter(|_| supervisor.diagnostics());
+            let tasks = self.environment.enter(|_, _| supervisor.diagnostics());
             let snapshot = Snapshot {
                 primary_count,
                 groups,
