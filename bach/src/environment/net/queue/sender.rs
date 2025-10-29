@@ -48,7 +48,10 @@ where
 
     pub(super) fn remove(&mut self, id: SenderId) -> bool {
         self.inner.remove(id);
-        self.active.retain(|v| *v != id);
+        // Optimize: find and remove the specific element instead of using retain
+        if let Some(pos) = self.active.iter().position(|v| *v == id) {
+            self.active.remove(pos);
+        }
         self.active.is_empty()
     }
 }
