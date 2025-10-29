@@ -12,39 +12,38 @@ impl IntoIterator for Segments {
 
     fn into_iter(self) -> Self::IntoIter {
         Iter {
-            packet: self.packet,
+            packet: Some(self.packet),
             segment_len: self.segment_len,
-            complete: false,
         }
     }
 }
 
 pub struct Iter {
-    packet: Packet,
+    packet: Option<Packet>,
     segment_len: usize,
-    complete: bool,
 }
 
 impl Iterator for Iter {
     type Item = Packet;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.complete {
-            return None;
-        }
+        let packet = self.packet.as_mut()?;
 
-        let split_len = self.packet.transport.payload().len().min(self.segment_len);
+        let split_len = packet.transport.payload().len().min(self.segment_len);
 
-        let payload = self.packet.transport.payload_mut().split_to(split_len);
+        let payload = packet.transport.payload_mut().split_to(split_len);
 
-        if self.packet.transport.payload().is_empty() {
-            self.complete = true;
-        }
+        let is_last = packet.transport.payload().is_empty();
 
-        let mut packet = self.packet.clone();
-        *packet.transport.payload_mut() = payload;
+        // Avoid cloning on the last segment by taking ownership
+        let mut result_packet = if is_last {
+            self.packet.take()?
+        } else {
+            packet.clone()
+        };
+        *result_packet.transport.payload_mut() = payload;
 
-        Some(packet)
+        Some(result_packet)
     }
 }
 

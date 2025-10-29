@@ -444,10 +444,10 @@ mod tests {
     }
 
     fn block_checks<T: AsPcap>(v: &T) -> Vec<u8> {
-        let mut out = Vec::new();
+        let len = v.pcap_len().unwrap();
+        let mut out = Vec::with_capacity(len);
         v.as_pcap(&mut out).unwrap();
 
-        let len = v.pcap_len().unwrap();
         // make sure the estimated lengths match
         assert_eq!(out.len(), len);
 

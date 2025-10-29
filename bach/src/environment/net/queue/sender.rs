@@ -73,27 +73,22 @@ impl Hasher {
     }
 
     fn hash_remote_addr(&self, addr: SocketAddr) -> u64 {
-        const ADDR_SPACE: usize = 16 + 2;
-        let mut bytes = [0; ADDR_SPACE];
-        let mut offset = 0;
-
         match addr {
             SocketAddr::V4(addr) => {
-                let octets = addr.ip().octets();
-                bytes[offset..offset + octets.len()].copy_from_slice(&octets);
-                offset += octets.len();
+                // 4 bytes for IPv4 + 2 bytes for port = 6 bytes
+                let mut bytes = [0u8; 6];
+                bytes[0..4].copy_from_slice(&addr.ip().octets());
+                bytes[4..6].copy_from_slice(&addr.port().to_le_bytes());
+                self.0.hash(&bytes)
             }
             SocketAddr::V6(addr) => {
-                let octets = addr.ip().octets();
-                bytes[offset..offset + octets.len()].copy_from_slice(&octets);
-                offset += octets.len();
+                // 16 bytes for IPv6 + 2 bytes for port = 18 bytes
+                let mut bytes = [0u8; 18];
+                bytes[0..16].copy_from_slice(&addr.ip().octets());
+                bytes[16..18].copy_from_slice(&addr.port().to_le_bytes());
+                self.0.hash(&bytes)
             }
         }
-
-        bytes[offset..offset + 2].copy_from_slice(&addr.port().to_le_bytes());
-        offset += 2;
-
-        self.0.hash(&bytes[..offset])
     }
 }
 
