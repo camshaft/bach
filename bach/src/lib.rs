@@ -8,6 +8,7 @@ mod tracing;
 pub mod metrics;
 
 pub mod coop;
+pub mod cost;
 pub mod environment;
 pub mod executor;
 pub mod ext;

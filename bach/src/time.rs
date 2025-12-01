@@ -14,8 +14,9 @@ pub use timeout::*;
 
 pub fn sleep(duration: Duration) -> Sleep {
     measure!("sleep", duration);
+    let debt = crate::cost::debt();
     scheduler::scope::borrow_with(|handle| {
-        let ticks = resolution::duration_to_ticks(duration);
+        let ticks = resolution::duration_to_ticks(duration) + debt;
         handle.delay(ticks)
     })
 }
@@ -28,16 +29,25 @@ pub fn sleep_until(target: Instant) -> Sleep {
     sleep(duration)
 }
 
+pub(crate) fn sleep_until_tick(ticks: u64) -> Sleep {
+    scheduler::scope::borrow_with(|handle| {
+        let target = ticks.saturating_sub(handle.ticks());
+        handle.delay(target)
+    })
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Ord, PartialOrd, Hash)]
 pub struct Instant(Duration);
 
 impl Instant {
     pub fn now() -> Self {
-        scheduler::scope::borrow_with(|v| v.now())
+        let debt = crate::cost::debt();
+        scheduler::scope::borrow_with(|v| v.now_with(debt))
     }
 
     pub fn try_now() -> Option<Self> {
-        scheduler::scope::try_borrow_with(|v| v.as_ref().map(|v| v.now()))
+        let debt = crate::cost::debt();
+        scheduler::scope::try_borrow_with(|v| v.as_ref().map(|v| v.now_with(debt)))
     }
 
     pub fn elapsed(self) -> Duration {
