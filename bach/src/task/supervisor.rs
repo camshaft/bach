@@ -209,7 +209,7 @@ impl fmt::Display for TaskDiagnostics {
         }
 
         if let Some(backtrace) = &self.backtrace {
-            writeln!(f, "\n  Backtrace:\n{}", backtrace)?;
+            writeln!(f, "\n  Backtrace:\n{backtrace}")?;
         }
 
         Ok(())

@@ -44,7 +44,7 @@ impl<T: core::ops::Deref<Target = [u8]>> fmt::Debug for Hex<'_, T> {
                 } else if (0x20..0x7f).contains(&b) {
                     write!(f, "{}", b as char)?;
                 } else {
-                    write!(f, "\\x{:02x}", b)?;
+                    write!(f, "\\x{b:02x}")?;
                 }
             }
         }
