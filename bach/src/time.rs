@@ -66,7 +66,7 @@ impl Instant {
         Self(duration)
     }
 
-    pub fn zero() -> Self {
+    pub const fn zero() -> Self {
         Self(Duration::ZERO)
     }
 }

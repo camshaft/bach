@@ -163,8 +163,7 @@ fn instant_zero() {
             // Sleep a bit and verify zero is still at the start
             sleep(Duration::from_secs(1)).await;
             let after_sleep = Instant::now();
-            assert_eq!(zero.elapsed_since_start(), Duration::ZERO);
-            assert!(after_sleep > zero);
+            assert_eq!(after_sleep, zero + Duration::from_secs(1));
         }
         .primary()
         .spawn();
