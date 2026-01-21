@@ -104,18 +104,24 @@ impl fmt::Display for Instant {
         let hours = duration.as_secs() / 60 / 60;
         if f.alternate() {
             let days = duration.as_secs() / 86400;
-            // Format nanoseconds with padding, then truncate trailing zeros
-            let nanos_formatted = format!("{nanos:09}");
-            let nanos_trimmed = nanos_formatted.trim_end_matches('0');
+            
+            // Calculate how many trailing zeros to remove without allocation
+            let mut trimmed_nanos = nanos;
+            let mut width = 9u32;
+            while width > 0 && trimmed_nanos % 10 == 0 {
+                trimmed_nanos /= 10;
+                width -= 1;
+            }
+            
             match (days, hours, mins) {
-                (0, 0, 0) if nanos_trimmed.is_empty() => write!(f, "{secs}"),
-                (0, 0, 0) => write!(f, "{secs}.{nanos_trimmed}"),
-                (0, 0, _) if nanos_trimmed.is_empty() => write!(f, "{mins}:{secs:02}"),
-                (0, 0, _) => write!(f, "{mins}:{secs:02}.{nanos_trimmed}"),
-                (0, _, _) if nanos_trimmed.is_empty() => write!(f, "{hours}:{mins:02}:{secs:02}"),
-                (0, _, _) => write!(f, "{hours}:{mins:02}:{secs:02}.{nanos_trimmed}"),
-                (_, _, _) if nanos_trimmed.is_empty() => write!(f, "{days}:{hours}:{mins:02}:{secs:02}"),
-                (_, _, _) => write!(f, "{days}:{hours}:{mins:02}:{secs:02}.{nanos_trimmed}"),
+                (0, 0, 0) if width == 0 => write!(f, "{secs}"),
+                (0, 0, 0) => write!(f, "{secs}.{trimmed_nanos:0width$}", width = width as usize),
+                (0, 0, _) if width == 0 => write!(f, "{mins}:{secs:02}"),
+                (0, 0, _) => write!(f, "{mins}:{secs:02}.{trimmed_nanos:0width$}", width = width as usize),
+                (0, _, _) if width == 0 => write!(f, "{hours}:{mins:02}:{secs:02}"),
+                (0, _, _) => write!(f, "{hours}:{mins:02}:{secs:02}.{trimmed_nanos:0width$}", width = width as usize),
+                (_, _, _) if width == 0 => write!(f, "{days}:{hours}:{mins:02}:{secs:02}"),
+                (_, _, _) => write!(f, "{days}:{hours}:{mins:02}:{secs:02}.{trimmed_nanos:0width$}", width = width as usize),
             }
         } else {
             write!(f, "{hours}:{mins:02}:{secs:02}.{nanos:09}")
