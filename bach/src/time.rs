@@ -170,18 +170,19 @@ mod tests {
         let display = format!("{instant:#}");
         assert_eq!(display, "0.000001000", "1000 nanos should display with proper padding");
 
-        // Test with minutes and seconds
-        let instant = Instant(Duration::new(65, 123_456_789));
+        // Test with minutes and seconds (1 minute + 5 seconds)
+        let instant = Instant(Duration::new(60 + 5, 123_456_789));
         let display = format!("{instant:#}");
         assert_eq!(display, "1:05.123456789", "65.123456789 seconds should format as minutes:seconds.nanos");
 
-        // Test with hours
-        let instant = Instant(Duration::new(3661, 999_999_999));
+        // Test with hours (1 hour + 1 minute + 1 second)
+        let instant = Instant(Duration::new(60 * 60 + 60 + 1, 999_999_999));
         let display = format!("{instant:#}");
         assert_eq!(display, "1:01:01.999999999", "3661.999999999 seconds should format as hours:minutes:seconds.nanos");
 
-        // Test with days
-        let instant = Instant(Duration::new(86400 + 3661, 1));
+        // Test with days (1 day + 1 hour + 1 minute + 1 second)
+        const SECONDS_PER_DAY: u64 = 24 * 60 * 60;
+        let instant = Instant(Duration::new(SECONDS_PER_DAY + 60 * 60 + 60 + 1, 1));
         let display = format!("{instant:#}");
         assert_eq!(display, "1:25:01:01.000000001", "1 day + 3661.000000001 seconds should include days");
     }
