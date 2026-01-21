@@ -146,3 +146,27 @@ impl Pacer {
         Poll::Pending
     }
 }
+
+#[test]
+fn instant_zero() {
+    sim(|| {
+        async {
+            let zero = Instant::zero();
+            let now = Instant::now();
+            
+            // Zero instant should represent the start of simulation time
+            assert_eq!(zero.elapsed_since_start(), Duration::ZERO);
+            
+            // Now should be greater than or equal to zero
+            assert!(now >= zero);
+            
+            // Sleep a bit and verify zero is still at the start
+            sleep(Duration::from_secs(1)).await;
+            let after_sleep = Instant::now();
+            assert_eq!(zero.elapsed_since_start(), Duration::ZERO);
+            assert!(after_sleep > zero);
+        }
+        .primary()
+        .spawn();
+    });
+}

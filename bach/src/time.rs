@@ -66,9 +66,7 @@ impl Instant {
         Self(duration)
     }
 
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub(crate) fn zero() -> Self {
+    pub fn zero() -> Self {
         Self(Duration::ZERO)
     }
 }
