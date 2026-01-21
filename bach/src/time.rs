@@ -105,10 +105,10 @@ impl fmt::Display for Instant {
         if f.alternate() {
             let days = duration.as_secs() / 86400;
             match (days, hours, mins) {
-                (0, 0, 0) => write!(f, "{secs}.{nanos}"),
-                (0, 0, _) => write!(f, "{mins}:{secs:02}.{nanos}"),
-                (0, _, _) => write!(f, "{hours}:{mins:02}:{secs:02}.{nanos}"),
-                (_, _, _) => write!(f, "{days}:{hours}:{mins:02}:{secs:02}.{nanos}"),
+                (0, 0, 0) => write!(f, "{secs}.{nanos:09}"),
+                (0, 0, _) => write!(f, "{mins}:{secs:02}.{nanos:09}"),
+                (0, _, _) => write!(f, "{hours}:{mins:02}:{secs:02}.{nanos:09}"),
+                (_, _, _) => write!(f, "{days}:{hours}:{mins:02}:{secs:02}.{nanos:09}"),
             }
         } else {
             write!(f, "{hours}:{mins:02}:{secs:02}.{nanos:09}")
@@ -140,5 +140,61 @@ pub(crate) mod resolution {
         let nanos_per_tick = tick_duration().as_nanos();
         let ticks = nanos / nanos_per_tick;
         ticks as u64
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn instant_display_alternate_format() {
+        // Test case from the issue: 1 second and 1000 nanos should not display as "1.1000"
+        // which looks like 1.1 seconds, but should display with 9-digit nanosecond padding
+        let instant = Instant(Duration::new(1, 1000));
+        let display = format!("{instant:#}");
+        assert_eq!(display, "1.000001000", "1 second + 1000 nanos should show as 1.000001000, not 1.1000");
+
+        // Test 0.5 seconds (500 million nanos)
+        let instant = Instant(Duration::new(0, 500_000_000));
+        let display = format!("{instant:#}");
+        assert_eq!(display, "0.500000000", "0.5 seconds should display correctly");
+
+        // Test 1 second exactly
+        let instant = Instant(Duration::new(1, 0));
+        let display = format!("{instant:#}");
+        assert_eq!(display, "1.000000000", "1 second should show with 9 zeros");
+
+        // Test just nanoseconds
+        let instant = Instant(Duration::new(0, 1000));
+        let display = format!("{instant:#}");
+        assert_eq!(display, "0.000001000", "1000 nanos should display with proper padding");
+
+        // Test with minutes and seconds
+        let instant = Instant(Duration::new(65, 123_456_789));
+        let display = format!("{instant:#}");
+        assert_eq!(display, "1:05.123456789", "65.123456789 seconds should format as minutes:seconds.nanos");
+
+        // Test with hours
+        let instant = Instant(Duration::new(3661, 999_999_999));
+        let display = format!("{instant:#}");
+        assert_eq!(display, "1:01:01.999999999", "3661.999999999 seconds should format as hours:minutes:seconds.nanos");
+
+        // Test with days
+        let instant = Instant(Duration::new(86400 + 3661, 1));
+        let display = format!("{instant:#}");
+        assert_eq!(display, "1:25:01:01.000000001", "1 day + 3661.000000001 seconds should include days");
+    }
+
+    #[test]
+    fn instant_display_regular_format() {
+        // Verify non-alternate format still works correctly
+        let instant = Instant(Duration::new(1, 1000));
+        let display = format!("{instant}");
+        assert_eq!(display, "0:00:01.000001000", "Regular format should show hours:minutes:seconds.nanos");
+
+        let instant = Instant(Duration::new(3661, 123_456_789));
+        let display = format!("{instant}");
+        assert_eq!(display, "1:01:01.123456789", "Regular format with hours should work");
     }
 }
