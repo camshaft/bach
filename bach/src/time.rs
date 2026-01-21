@@ -104,9 +104,9 @@ impl fmt::Display for Instant {
         let hours = duration.as_secs() / 60 / 60;
         if f.alternate() {
             let days = duration.as_secs() / 86400;
-            // Format nanoseconds with trailing zeros truncated
+            // Format nanoseconds with padding, then truncate trailing zeros
             let nanos_formatted = format!("{nanos:09}");
-            let nanos_trimmed = nanos_formatted.trim_end_matches('0').trim_end_matches('.');
+            let nanos_trimmed = nanos_formatted.trim_end_matches('0');
             match (days, hours, mins) {
                 (0, 0, 0) if nanos_trimmed.is_empty() => write!(f, "{secs}"),
                 (0, 0, 0) => write!(f, "{secs}.{nanos_trimmed}"),
