@@ -104,7 +104,7 @@ impl fmt::Display for Instant {
         let hours = duration.as_secs() / 60 / 60;
         if f.alternate() {
             let days = duration.as_secs() / 86400;
-            
+
             // Calculate how many trailing zeros to remove without allocation
             let mut trimmed_nanos = nanos;
             let mut width = 9u32;
@@ -112,16 +112,28 @@ impl fmt::Display for Instant {
                 trimmed_nanos /= 10;
                 width -= 1;
             }
-            
+
             match (days, hours, mins) {
                 (0, 0, 0) if width == 0 => write!(f, "{secs}"),
                 (0, 0, 0) => write!(f, "{secs}.{trimmed_nanos:0width$}", width = width as usize),
                 (0, 0, _) if width == 0 => write!(f, "{mins}:{secs:02}"),
-                (0, 0, _) => write!(f, "{mins}:{secs:02}.{trimmed_nanos:0width$}", width = width as usize),
+                (0, 0, _) => write!(
+                    f,
+                    "{mins}:{secs:02}.{trimmed_nanos:0width$}",
+                    width = width as usize
+                ),
                 (0, _, _) if width == 0 => write!(f, "{hours}:{mins:02}:{secs:02}"),
-                (0, _, _) => write!(f, "{hours}:{mins:02}:{secs:02}.{trimmed_nanos:0width$}", width = width as usize),
+                (0, _, _) => write!(
+                    f,
+                    "{hours}:{mins:02}:{secs:02}.{trimmed_nanos:0width$}",
+                    width = width as usize
+                ),
                 (_, _, _) if width == 0 => write!(f, "{days}:{hours}:{mins:02}:{secs:02}"),
-                (_, _, _) => write!(f, "{days}:{hours}:{mins:02}:{secs:02}.{trimmed_nanos:0width$}", width = width as usize),
+                (_, _, _) => write!(
+                    f,
+                    "{days}:{hours}:{mins:02}:{secs:02}.{trimmed_nanos:0width$}",
+                    width = width as usize
+                ),
             }
         } else {
             write!(f, "{hours}:{mins:02}:{secs:02}.{nanos:09}")
@@ -166,53 +178,83 @@ mod tests {
         // With trailing zeros truncated, this should be clear and unambiguous
         let instant = Instant(Duration::new(1, 1000));
         let display = format!("{instant:#}");
-        assert_eq!(display, "1.000001", "1 second + 1000 nanos should show as 1.000001 (trailing zeros truncated)");
+        assert_eq!(
+            display, "1.000001",
+            "1 second + 1000 nanos should show as 1.000001 (trailing zeros truncated)"
+        );
 
         // Test 0.5 seconds (500 million nanos)
         let instant = Instant(Duration::new(0, 500_000_000));
         let display = format!("{instant:#}");
-        assert_eq!(display, "0.5", "0.5 seconds should display with trailing zeros truncated");
+        assert_eq!(
+            display, "0.5",
+            "0.5 seconds should display with trailing zeros truncated"
+        );
 
         // Test 1 second exactly (no nanos, so no decimal point)
         let instant = Instant(Duration::new(1, 0));
         let display = format!("{instant:#}");
-        assert_eq!(display, "1", "1 second exactly should show without decimal point");
+        assert_eq!(
+            display, "1",
+            "1 second exactly should show without decimal point"
+        );
 
         // Test just nanoseconds
         let instant = Instant(Duration::new(0, 1000));
         let display = format!("{instant:#}");
-        assert_eq!(display, "0.000001", "1000 nanos should display with trailing zeros truncated");
+        assert_eq!(
+            display, "0.000001",
+            "1000 nanos should display with trailing zeros truncated"
+        );
 
         // Test with minutes and seconds (1 minute + 5 seconds)
         let instant = Instant(Duration::new(60 + 5, 123_456_789));
         let display = format!("{instant:#}");
-        assert_eq!(display, "1:05.123456789", "65.123456789 seconds should format as minutes:seconds.nanos");
+        assert_eq!(
+            display, "1:05.123456789",
+            "65.123456789 seconds should format as minutes:seconds.nanos"
+        );
 
         // Test with minutes and seconds (no nanos)
         let instant = Instant(Duration::new(60 + 5, 0));
         let display = format!("{instant:#}");
-        assert_eq!(display, "1:05", "65 seconds exactly should not show decimal point");
+        assert_eq!(
+            display, "1:05",
+            "65 seconds exactly should not show decimal point"
+        );
 
         // Test with hours (1 hour + 1 minute + 1 second)
         let instant = Instant(Duration::new(60 * 60 + 60 + 1, 999_999_999));
         let display = format!("{instant:#}");
-        assert_eq!(display, "1:01:01.999999999", "3661.999999999 seconds should format as hours:minutes:seconds.nanos");
+        assert_eq!(
+            display, "1:01:01.999999999",
+            "3661.999999999 seconds should format as hours:minutes:seconds.nanos"
+        );
 
         // Test with hours (no nanos)
         let instant = Instant(Duration::new(60 * 60 + 60 + 1, 0));
         let display = format!("{instant:#}");
-        assert_eq!(display, "1:01:01", "3661 seconds exactly should not show decimal point");
+        assert_eq!(
+            display, "1:01:01",
+            "3661 seconds exactly should not show decimal point"
+        );
 
         // Test with days (1 day + 1 hour + 1 minute + 1 second)
         const SECONDS_PER_DAY: u64 = 24 * 60 * 60;
         let instant = Instant(Duration::new(SECONDS_PER_DAY + 60 * 60 + 60 + 1, 1));
         let display = format!("{instant:#}");
-        assert_eq!(display, "1:25:01:01.000000001", "1 day + 3661.000000001 seconds should include days");
+        assert_eq!(
+            display, "1:25:01:01.000000001",
+            "1 day + 3661.000000001 seconds should include days"
+        );
 
         // Test with days (no nanos)
         let instant = Instant(Duration::new(SECONDS_PER_DAY + 60 * 60 + 60 + 1, 0));
         let display = format!("{instant:#}");
-        assert_eq!(display, "1:25:01:01", "1 day + 3661 seconds exactly should not show decimal point");
+        assert_eq!(
+            display, "1:25:01:01",
+            "1 day + 3661 seconds exactly should not show decimal point"
+        );
     }
 
     #[test]
@@ -220,10 +262,16 @@ mod tests {
         // Verify non-alternate format still works correctly
         let instant = Instant(Duration::new(1, 1000));
         let display = format!("{instant}");
-        assert_eq!(display, "0:00:01.000001000", "Regular format should show hours:minutes:seconds.nanos");
+        assert_eq!(
+            display, "0:00:01.000001000",
+            "Regular format should show hours:minutes:seconds.nanos"
+        );
 
         let instant = Instant(Duration::new(3661, 123_456_789));
         let display = format!("{instant}");
-        assert_eq!(display, "1:01:01.123456789", "Regular format with hours should work");
+        assert_eq!(
+            display, "1:01:01.123456789",
+            "Regular format with hours should work"
+        );
     }
 }
