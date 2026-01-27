@@ -73,9 +73,11 @@ pub fn sim<F: FnOnce()>(f: F) {
                     return false;
                 }
             }
-            _ => {}
-            // TODO
+            _ => {
+                // TODO
+            }
         }
+        
         true
     });
 
