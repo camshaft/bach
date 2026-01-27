@@ -94,7 +94,7 @@ jobs:
         run: cargo udeps --workspace --all-targets
         env:
           RUSTC_WRAPPER: ""
-  
+
   test:
     runs-on: ${{ matrix.os }}
     needs: env
