@@ -59,7 +59,7 @@ pub fn sim<F: FnOnce()>(f: F) {
 
     violations.retain(|v| {
         match v {
-            checkers::Violation::Leaked { alloc } => {
+            Violation::Leaked { alloc } => {
                 if bt_matches(alloc, |bt| {
                     bt.contains("bolero_generator::any::default::with")
                         || bt.contains("bach::group::Groups::name_to_id")
@@ -67,7 +67,7 @@ pub fn sim<F: FnOnce()>(f: F) {
                     return false;
                 }
             }
-            checkers::Violation::MissingFree { request } => {
+            Violation::MissingFree { request } => {
                 if bt_matches(request, |bt| bt.contains("thread_local::destructors")) {
                     return false;
                 }

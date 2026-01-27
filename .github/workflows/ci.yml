@@ -86,10 +86,8 @@ jobs:
 
       - uses: camshaft/rust-cache@v1
 
-      - uses: camshaft/install@v1
-        with:
-          crate: cargo-udeps
-          args: --locked
+      - name: Install cargo-udeps
+        run: cargo install --locked --version 0.1.60 cargo-udeps
 
       - name: Run cargo udeps
         run: cargo udeps --workspace --all-targets
@@ -109,9 +107,6 @@ jobs:
           - rust: stable
             os: ubuntu-latest
             features: default,metrics
-          - rust: stable
-            os: ubuntu-latest
-            features: default,leaks
     steps:
       - uses: actions/checkout@v6
         with:
@@ -131,16 +126,32 @@ jobs:
         env:
           DEFAULT_FEATURES: ${{ contains(matrix.features, 'default') && '' || ' --no-default-features' }}
           FEATURES_LIST: ${{ matrix.features && format(' --features {0}', matrix.features) || '' }}
-
-          # NOTE: Leak-checking relies on std::backtrace being captured so we can
-          # filter known allocator false-positives. We enable library backtraces
-          # (RUST_LIB_BACKTRACE=1), but disable panic backtrace printing
-          # (RUST_BACKTRACE=0) because printing panic backtraces can hang under
-          # the `checkers` global allocator.
-          RUST_BACKTRACE: ${{ contains(matrix.features, 'leaks') && '0' || env.RUST_BACKTRACE }}
-          RUST_LIB_BACKTRACE: ${{ contains(matrix.features, 'leaks') && '1' || '' }}
         run: |
           cargo test $DEFAULT_FEATURES $FEATURES_LIST
+  
+  leaks:
+    name: leaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: true
+
+      - name: Install toolchain
+        run: |
+          rustup toolchain install stable
+          rustup override set stable
+
+      - uses: camshaft/rust-cache@v1
+
+      - name: Run leak-checked tests
+        env:
+          # Leak allowlisting matches against captured std::backtrace output.
+          RUST_LIB_BACKTRACE: 1
+          # Disable panic backtrace printing (can stall under the checkers global allocator).
+          RUST_BACKTRACE: 0
+        run: |
+          cargo test -p bach-tests --features leaks --lib -- --nocapture --test-threads=1
 
   miri:
     runs-on: ubuntu-latest
