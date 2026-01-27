@@ -3,7 +3,6 @@
 static ALLOC: checkers::Allocator = checkers::Allocator::system();
 use std::backtrace::BacktraceStatus;
 
-
 macro_rules! tests {
     ($($(#[cfg($($tt:tt)*)])? $name:ident),* $(,)?) => {
         $(

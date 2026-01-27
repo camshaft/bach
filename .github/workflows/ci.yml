@@ -89,6 +89,7 @@ jobs:
       - uses: camshaft/install@v1
         with:
           crate: cargo-udeps
+          args: --locked
 
       - name: Run cargo udeps
         run: cargo udeps --workspace --all-targets
