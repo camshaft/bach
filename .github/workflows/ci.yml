@@ -86,8 +86,9 @@ jobs:
 
       - uses: camshaft/rust-cache@v1
 
-      - name: Install cargo-udeps
-        run: cargo install --locked --version 0.1.60 cargo-udeps
+      - uses: camshaft/install@v1
+        with:
+          crate: cargo-udeps
 
       - name: Run cargo udeps
         run: cargo udeps --workspace --all-targets
