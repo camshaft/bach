@@ -50,8 +50,7 @@ fn timer_test() {
             let expected = now + delay;
             assert_eq!(
                 actual, expected,
-                "actual: {:?}, expected: {:?}",
-                actual, expected
+                "actual: {actual:?}, expected: {expected:?}"
             );
         }
     }
@@ -127,10 +126,7 @@ impl Pacer {
 
         // record the time that we yielded
         let now = Instant::now();
-        let prev_yield_window = core::mem::replace(
-            &mut self.yield_window,
-            Some(now + core::time::Duration::from_millis(1)),
-        );
+        let prev_yield_window = self.yield_window.replace(now + core::time::Duration::from_millis(1));
 
         // if the current time falls outside of the previous window then don't actually yield - the
         // application isn't sending at that rate

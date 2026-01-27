@@ -147,8 +147,7 @@ mod tests {
                 assert_eq!(
                     next_occupied_simple(&bitset, index),
                     bitset.next_occupied(index),
-                    "index: {}",
-                    index
+                    "index: {index}"
                 );
             }
         });
