@@ -95,6 +95,7 @@ jobs:
         env:
           RUSTC_WRAPPER: ""
 
+  
   test:
     runs-on: ${{ matrix.os }}
     needs: env
@@ -130,6 +131,14 @@ jobs:
         env:
           DEFAULT_FEATURES: ${{ contains(matrix.features, 'default') && '' || ' --no-default-features' }}
           FEATURES_LIST: ${{ matrix.features && format(' --features {0}', matrix.features) || '' }}
+
+          # NOTE: Leak-checking relies on std::backtrace being captured so we can
+          # filter known allocator false-positives. We enable library backtraces
+          # (RUST_LIB_BACKTRACE=1), but disable panic backtrace printing
+          # (RUST_BACKTRACE=0) because printing panic backtraces can hang under
+          # the `checkers` global allocator.
+          RUST_BACKTRACE: ${{ contains(matrix.features, 'leaks') && '0' || env.RUST_BACKTRACE }}
+          RUST_LIB_BACKTRACE: ${{ contains(matrix.features, 'leaks') && '1' || '' }}
         run: |
           cargo test $DEFAULT_FEATURES $FEATURES_LIST
 
