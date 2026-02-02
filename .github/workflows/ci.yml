@@ -108,9 +108,6 @@ jobs:
           - rust: stable
             os: ubuntu-latest
             features: default,metrics
-          - rust: stable
-            os: ubuntu-latest
-            features: default,leaks
     steps:
       - uses: actions/checkout@v6
         with:
@@ -132,6 +129,30 @@ jobs:
           FEATURES_LIST: ${{ matrix.features && format(' --features {0}', matrix.features) || '' }}
         run: |
           cargo test $DEFAULT_FEATURES $FEATURES_LIST
+  
+  leaks:
+    name: leaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: true
+
+      - name: Install toolchain
+        run: |
+          rustup toolchain install stable
+          rustup override set stable
+
+      - uses: camshaft/rust-cache@v1
+
+      - name: Run leak-checked tests
+        env:
+          # Leak allowlisting matches against captured std::backtrace output.
+          RUST_LIB_BACKTRACE: 1
+          # Disable panic backtrace printing (can stall under the checkers global allocator).
+          RUST_BACKTRACE: 0
+        run: |
+          cargo test -p bach-tests --features leaks --lib -- --nocapture --test-threads=1
 
   miri:
     runs-on: ubuntu-latest

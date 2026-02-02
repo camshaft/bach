@@ -1,6 +1,7 @@
 #[cfg(feature = "leaks")]
 #[global_allocator]
 static ALLOC: checkers::Allocator = checkers::Allocator::system();
+use std::backtrace::BacktraceStatus;
 
 macro_rules! tests {
     ($($(#[cfg($($tt:tt)*)])? $name:ident),* $(,)?) => {
@@ -46,41 +47,28 @@ pub fn sim<F: FnOnce()>(f: F) {
     snapshot.validate(&mut violations);
 
     fn bt_matches(req: &checkers::Request, predicate: impl Fn(&str) -> bool) -> bool {
-        if let Some(bt) = &req.backtrace {
-            for frame in bt.frames() {
-                for sym in frame.symbols() {
-                    let sym = format!("{sym:?}");
-
-                    if predicate(&sym) {
-                        return true;
-                    }
-                }
-            }
+        // If backtraces aren’t enabled/captured, there’s nothing meaningful to filter on.
+        if req.backtrace.status() != BacktraceStatus::Captured {
+            return false;
         }
 
-        false
+        // std::backtrace doesn't give stable frame iteration; use its Debug output.
+        let bt = format!("{:?}", req.backtrace);
+        predicate(&bt)
     }
 
     violations.retain(|v| {
         match v {
             Violation::Leaked { alloc } => {
-                if bt_matches(alloc, |sym| {
-                    [
-                        "bolero_generator::any::default::with",
-                        "bach::group::Groups::name_to_id",
-                    ]
-                    .iter()
-                    .any(|pat| sym.contains(pat))
+                if bt_matches(alloc, |bt| {
+                    bt.contains("bolero_generator::any::default::with")
+                        || bt.contains("bach::group::Groups::name_to_id")
                 }) {
                     return false;
                 }
             }
             Violation::MissingFree { request } => {
-                if bt_matches(request, |sym| {
-                    ["thread_local::destructors"]
-                        .iter()
-                        .any(|pat| sym.contains(pat))
-                }) {
+                if bt_matches(request, |bt| bt.contains("thread_local::destructors")) {
                     return false;
                 }
             }
