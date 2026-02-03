@@ -29,7 +29,7 @@ intrusive-collections = "0.9"
 pin-project-lite = "0.2"
 metrics = { version = "0.24", optional = true }
 rand = { version = "0.9", default-features = false }
-rand_xoshiro = "0.7"
+rand_xoshiro = "0.8"
 s2n-quic-core = { version = "0.72", default-features = false, optional = true }
 siphasher = { version = "1", default-features = false, optional = true }
 slotmap = "1"
