@@ -28,7 +28,7 @@ futures-core = { version = "0.3", default-features = false }
 intrusive-collections = "0.9"
 pin-project-lite = "0.2"
 metrics = { version = "0.24", optional = true }
-rand = { version = "0.9", default-features = false }
+rand = { version = "0.10", default-features = false }
 rand_xoshiro = "0.7"
 s2n-quic-core = { version = "0.72", default-features = false, optional = true }
 siphasher = { version = "1", default-features = false, optional = true }
