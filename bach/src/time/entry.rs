@@ -4,6 +4,12 @@ pub trait Entry: Sized {
     fn delay(&self) -> u64;
     fn start_tick(&self) -> u64;
     fn set_start_tick(&mut self, tick: u64);
+
+    /// Returns `true` if this entry has been cancelled and should be dropped
+    /// during cascading rather than re-inserted into the wheel.
+    fn is_cancelled(&self) -> bool {
+        false
+    }
 }
 
 pub trait Queue<Entry> {
@@ -96,6 +102,14 @@ pub mod atomic {
 
         fn set_start_tick(&mut self, tick: u64) {
             self.start_tick.store(tick, Ordering::SeqCst);
+        }
+
+        fn is_cancelled(&self) -> bool {
+            // The application holds one Arc clone (via `Timer`); the wheel
+            // holds another.  When the application drops its `Timer` the
+            // strong count falls to 1, meaning only the wheel still holds the
+            // entry and it should be discarded rather than cascaded further.
+            Arc::strong_count(self) == 1
         }
     }
 
