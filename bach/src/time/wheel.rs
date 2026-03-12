@@ -229,10 +229,17 @@ mod tests {
             sorted.sort_unstable();
 
             let mut should_wake = false;
+            // Keep one clone per entry to simulate the application holding an
+            // Arc (as `Timer` does).  Without this, `strong_count` would be 1
+            // the moment an entry enters the wheel, making `is_cancelled()`
+            // return `true` for every entry.
+            let mut alive = vec![];
             for entry in entries.iter().copied() {
                 // adding a 0-tick will immediately wake the entry
                 should_wake |= entry == 0;
-                wheel.insert(atomic::Entry::new(entry));
+                let e = atomic::Entry::new(entry);
+                alive.push(e.clone());
+                wheel.insert(e);
             }
 
             let mut sorted = sorted.drain(..);
@@ -275,6 +282,7 @@ mod tests {
             total_ticks += elapsed;
 
             assert_eq!(wheel.ticks(), total_ticks);
+            drop(alive);
         }
     }
 

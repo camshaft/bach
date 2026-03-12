@@ -39,7 +39,6 @@ pub mod atomic {
         waker: AtomicWaker,
         expired: AtomicBool,
         registered: AtomicBool,
-        cancelled: AtomicBool,
         delay: u64,
         start_tick: AtomicU64,
         link: LinkedListLink,
@@ -58,7 +57,6 @@ pub mod atomic {
                 waker: AtomicWaker::new(),
                 expired: AtomicBool::new(false),
                 registered: AtomicBool::new(false),
-                cancelled: AtomicBool::new(false),
                 delay,
                 start_tick: AtomicU64::new(0),
                 link: LinkedListLink::new(),
@@ -79,7 +77,6 @@ pub mod atomic {
         }
 
         pub fn cancel(&self) {
-            self.cancelled.store(true, Ordering::Relaxed);
             self.waker.take();
         }
 
@@ -108,7 +105,11 @@ pub mod atomic {
         }
 
         fn is_cancelled(&self) -> bool {
-            self.cancelled.load(Ordering::Relaxed)
+            // The application holds one Arc clone (via `Timer`); the wheel
+            // holds another.  When the application drops its `Timer` the
+            // strong count falls to 1, meaning only the wheel still holds the
+            // entry and it should be discarded rather than cascaded further.
+            Arc::strong_count(self) == 1
         }
     }
 
