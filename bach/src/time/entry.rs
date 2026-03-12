@@ -4,6 +4,12 @@ pub trait Entry: Sized {
     fn delay(&self) -> u64;
     fn start_tick(&self) -> u64;
     fn set_start_tick(&mut self, tick: u64);
+
+    /// Returns `true` if this entry has been cancelled and should be dropped
+    /// during cascading rather than re-inserted into the wheel.
+    fn is_cancelled(&self) -> bool {
+        false
+    }
 }
 
 pub trait Queue<Entry> {
@@ -33,6 +39,7 @@ pub mod atomic {
         waker: AtomicWaker,
         expired: AtomicBool,
         registered: AtomicBool,
+        cancelled: AtomicBool,
         delay: u64,
         start_tick: AtomicU64,
         link: LinkedListLink,
@@ -51,6 +58,7 @@ pub mod atomic {
                 waker: AtomicWaker::new(),
                 expired: AtomicBool::new(false),
                 registered: AtomicBool::new(false),
+                cancelled: AtomicBool::new(false),
                 delay,
                 start_tick: AtomicU64::new(0),
                 link: LinkedListLink::new(),
@@ -71,6 +79,7 @@ pub mod atomic {
         }
 
         pub fn cancel(&self) {
+            self.cancelled.store(true, Ordering::Relaxed);
             self.waker.take();
         }
 
@@ -96,6 +105,10 @@ pub mod atomic {
 
         fn set_start_tick(&mut self, tick: u64) {
             self.start_tick.store(tick, Ordering::SeqCst);
+        }
+
+        fn is_cancelled(&self) -> bool {
+            self.cancelled.load(Ordering::Relaxed)
         }
     }
 

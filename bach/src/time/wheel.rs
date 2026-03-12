@@ -115,6 +115,14 @@ impl<E: Entry> Wheel<E> {
             let (mut list, did_wrap) = self.stack_mut(index).tick(can_skip);
 
             while let Some(entry) = list.pop() {
+                // Drop cancelled entries immediately rather than re-inserting
+                // them into the wheel. Without this check, cancelled entries
+                // cascade between levels until their absolute_time is reached,
+                // potentially causing the iteration limit to be exceeded.
+                if entry.is_cancelled() {
+                    continue;
+                }
+
                 let start_tick = entry.start_tick();
                 if self.insert_at(entry, start_tick) {
                     // A pending item is ready
@@ -301,5 +309,49 @@ mod tests {
             &[799215800378, 10940666347][..],
             &[][..],
         ]);
+    }
+
+    /// Regression test: cancelled entries must be dropped during cascading
+    /// rather than re-inserted into the wheel.  Without the fix, entries
+    /// cascading between levels accumulate enough iterations to trigger the
+    /// "advance iterated too many times" debug_assert panic.
+    ///
+    /// The panic threshold is `u16::MAX * 4` (262_140).  To reliably exceed
+    /// it we insert entries whose delays span all 256 byte-0 positions across
+    /// several byte-1 values, cancel every one of them, and then ask the
+    /// wheel to advance to a single real timer placed after all cancelled
+    /// entries.
+    #[test]
+    fn cancelled_timers_do_not_cause_excessive_iteration() {
+        let mut wheel = Wheel::default();
+
+        // Fill every byte-0 slot in level-0 across 4 byte-1 values.
+        // Each unique (byte-0, byte-1) combination creates a distinct entry
+        // that would otherwise cascade between levels many times before
+        // expiring, quickly exhausting the iteration budget.
+        let mut entries = alloc::vec::Vec::new();
+        for byte1 in 0u64..4 {
+            for byte0 in 1u64..=255 {
+                let delay = byte1 * 256 + byte0 + 1000;
+                let entry = atomic::Entry::new(delay);
+                entries.push(entry.clone());
+                wheel.insert(entry);
+            }
+        }
+
+        // Cancel every entry – they remain in the wheel but should now be
+        // discarded when encountered during cascading.
+        for entry in &entries {
+            entry.cancel();
+        }
+        drop(entries);
+
+        // Insert one real (non-cancelled) timer beyond all cancelled ones.
+        wheel.insert(atomic::Entry::new(10_000));
+
+        // This must complete without hitting the iteration-limit assert.
+        while let Some(_ticks) = wheel.advance() {
+            wheel.wake(atomic::wake);
+        }
     }
 }
