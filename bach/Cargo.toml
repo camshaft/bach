@@ -31,7 +31,7 @@ metrics = { version = "0.24", optional = true }
 rand = { version = "0.10", default-features = false }
 rand_core_compat = { package = "rand_core", version = "0.9", default-features = false }
 rand_xoshiro = "0.8"
-s2n-quic-core = { version = "0.78", default-features = false, optional = true }
+s2n-quic-core = { version = "0.80", default-features = false, optional = true }
 siphasher = { version = "1", default-features = false, optional = true }
 slotmap = "1"
 tokio = { version = "1", default-features = false, features = ["sync"] }
