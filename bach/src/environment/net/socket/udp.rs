@@ -1,23 +1,28 @@
 use crate::{
     environment::net::{
-        ip::{header, transport, Category, Header, Packet, Segments},
         monitor::List as Monitors,
+        registry,
         socket::{self, RecvOptions, RecvResult, SendOptions},
     },
-    ext::*,
     net::{
         monitor::{SocketRead, SocketWrite},
         SocketAddr,
     },
-    queue::Pushable,
-    sync::channel,
 };
-use core::task::{Context, Poll};
-use std::{io, sync::Mutex};
+use core::{
+    future::Future,
+    pin::pin,
+    task::{Context, Poll},
+};
+use std::{
+    io,
+    panic::{self, AssertUnwindSafe},
+    sync::Mutex,
+};
+use turmoil_net::shim::tokio::net::UdpSocket as TurmoilUdpSocket;
 
 pub struct Socket {
-    sender: Mutex<Sender>,
-    receiver: Mutex<Receiver>,
+    inner: Option<TurmoilUdpSocket>,
     local_addr: SocketAddr,
     peer_addr: Mutex<Option<SocketAddr>>,
     monitors: Monitors,
@@ -25,45 +30,42 @@ pub struct Socket {
 
 macro_rules! lock {
     ($lock:expr) => {
-        $lock
-            .lock()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("{e}")))?
+        $lock.lock().map_err(|e| io::Error::other(format!("{e}")))?
     };
 }
 
 impl Socket {
-    pub fn new(
-        sender: channel::Sender<Segments>,
-        receiver: channel::Receiver<Packet>,
-        local_addr: SocketAddr,
-        monitors: Monitors,
-    ) -> Self {
-        let sender = Mutex::new(Sender::new(sender));
-        let receiver = Mutex::new(Receiver::new(receiver));
-        Self {
-            sender,
-            receiver,
+    pub fn new(inner: TurmoilUdpSocket, monitors: Monitors) -> io::Result<Self> {
+        let local_addr = inner.local_addr()?;
+        Ok(Self {
+            inner: Some(inner),
             local_addr,
             peer_addr: Mutex::new(None),
             monitors,
-        }
+        })
     }
 }
 
 impl socket::Socket for Socket {
-    fn poll_connect(&self, _cx: &mut Context, peer_addr: SocketAddr) -> Poll<io::Result<()>> {
-        *lock!(self.peer_addr) = Some(peer_addr);
-        Poll::Ready(Ok(()))
+    fn poll_connect(&self, cx: &mut Context, peer_addr: SocketAddr) -> Poll<io::Result<()>> {
+        set_current_group()?;
+
+        let mut future = pin!(self.inner().connect(peer_addr));
+        match Future::poll(future.as_mut(), cx) {
+            Poll::Ready(Ok(())) => {
+                *lock!(self.peer_addr) = Some(peer_addr);
+                Poll::Ready(Ok(()))
+            }
+            Poll::Ready(Err(err)) => Poll::Ready(Err(err)),
+            Poll::Pending => Poll::Pending,
+        }
     }
 
     fn peer_addr(&self) -> io::Result<SocketAddr> {
         if let Some(peer_addr) = *lock!(self.peer_addr) {
             Ok(peer_addr)
         } else {
-            Err(io::Error::new(
-                io::ErrorKind::NotConnected,
-                "Socket not connected",
-            ))
+            self.with_current(|| self.inner().peer_addr())
         }
     }
 
@@ -108,16 +110,112 @@ impl socket::Socket for Socket {
         payload: &[io::IoSlice],
         opts: SendOptions,
     ) -> io::Result<usize> {
-        let peer_addr = *lock!(self.peer_addr);
-        lock!(self.sender).sendmsg(
-            cx,
-            &self.local_addr,
-            peer_addr,
-            destination,
+        if opts.source.is_some() {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "setting a source address is not yet supported by the turmoil-net backend",
+            ));
+        }
+
+        if opts.segment_len == Some(0) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "segment_len must be greater than zero",
+            ));
+        }
+
+        let destination = if destination.ip().is_unspecified() || destination.port() == 0 {
+            self.peer_addr()?
+        } else {
+            *destination
+        };
+
+        let mut socket_write = SocketWrite {
+            local_addr: &self.local_addr,
+            peer_addr: &destination,
+            transport: crate::net::monitor::Transport::Udp,
             payload,
-            opts,
-            &self.monitors,
-        )
+            opts: &opts,
+        };
+        self.monitors.on_socket_write(&mut socket_write)?;
+
+        let payload = flatten_payload(payload);
+        let segments = segment_payload(&payload, opts.segment_len);
+        let mut cx = cx;
+
+        self.with_current(|| {
+            let mut sent = 0;
+
+            for segment in &segments {
+                let len = if let Some(cx) = cx.as_deref_mut() {
+                    let mut future = pin!(self.inner().send_to(segment, destination));
+                    match Future::poll(future.as_mut(), cx) {
+                        Poll::Ready(res) => res?,
+                        Poll::Pending => return Err(io::ErrorKind::WouldBlock.into()),
+                    }
+                } else {
+                    self.inner().try_send_to(segment, destination)?
+                };
+
+                sent += len;
+            }
+
+            let (monitors, packets) = registry::with_registry(|registry| {
+                Ok((registry.monitors(), registry.drain_packets()))
+            })?;
+            let mut panic_payload = None;
+
+            for packet in packets {
+                let Some(monitor_packet) = monitor_packet(&packet) else {
+                    registry::with_registry(|registry| {
+                        registry.deliver(packet);
+                        Ok(())
+                    })?;
+                    continue;
+                };
+
+                let sent = panic::catch_unwind(AssertUnwindSafe(|| {
+                    monitors.on_packet_sent(&monitor_packet)
+                }));
+                let sent = match sent {
+                    Ok(command) => command,
+                    Err(payload) => {
+                        panic_payload = Some(payload);
+                        break;
+                    }
+                };
+
+                if sent.is_drop() {
+                    continue;
+                }
+
+                let received = panic::catch_unwind(AssertUnwindSafe(|| {
+                    monitors.on_packet_received(&monitor_packet)
+                }));
+                let received = match received {
+                    Ok(command) => command,
+                    Err(payload) => {
+                        panic_payload = Some(payload);
+                        break;
+                    }
+                };
+
+                if received.is_drop() {
+                    continue;
+                }
+
+                registry::with_registry(|registry| {
+                    registry.deliver(packet);
+                    Ok(())
+                })?;
+            }
+
+            if let Some(payload) = panic_payload {
+                panic::resume_unwind(payload);
+            }
+
+            Ok(sent)
+        })
     }
 
     fn recvmsg(
@@ -126,243 +224,149 @@ impl socket::Socket for Socket {
         payload: &mut [io::IoSliceMut],
         opts: RecvOptions,
     ) -> io::Result<RecvResult> {
-        let peer_addr = *lock!(self.peer_addr);
-        lock!(self.receiver).recvmsg(cx, peer_addr, payload, opts, &self.monitors)
+        if opts.gro {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "GRO isn't supported by the turmoil-net backend",
+            ));
+        }
+
+        let capacity = payload.iter().map(|chunk| chunk.len()).sum();
+        let mut buffer = vec![0; capacity];
+
+        let (received, peer_addr) = self.with_current(|| {
+            if opts.peek && cx.is_none() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Unsupported,
+                    "peek without a task context isn't supported by the turmoil-net backend",
+                ));
+            }
+
+            if opts.peek {
+                let mut future = pin!(self.inner().peek_from(&mut buffer));
+                match Future::poll(future.as_mut(), cx.expect("peek requires a task context")) {
+                    Poll::Ready(res) => res,
+                    Poll::Pending => Err(io::ErrorKind::WouldBlock.into()),
+                }
+            } else if let Some(cx) = cx {
+                let mut future = pin!(self.inner().recv_from(&mut buffer));
+                match Future::poll(future.as_mut(), cx) {
+                    Poll::Ready(res) => res,
+                    Poll::Pending => Err(io::ErrorKind::WouldBlock.into()),
+                }
+            } else {
+                self.inner().try_recv_from(&mut buffer)
+            }
+        })?;
+
+        let copied = copy_payload(&buffer[..received], payload);
+        let mut result = RecvResult {
+            peer_addr,
+            local_addr: self.local_addr,
+            ecn: 0,
+            len: copied,
+            segment_len: copied,
+            truncation_len: 0,
+        };
+
+        let mut socket_read = SocketRead {
+            result: &mut result,
+            payload,
+        };
+        self.monitors.on_socket_read(&mut socket_read)?;
+
+        Ok(result)
     }
 
     fn shutdown(&self, how: std::net::Shutdown) -> io::Result<()> {
-        // UDP doesn't have a shutdown method
         let _ = how;
         Ok(())
     }
 }
 
-struct Sender {
-    channel: channel::Sender<Segments>,
-    id: u16,
-    ttl: u8,
-}
-
-impl Sender {
-    fn new(channel: channel::Sender<Segments>) -> Self {
-        Self {
-            channel,
-            id: 0,
-            ttl: 64,
-        }
+impl Socket {
+    fn inner(&self) -> &TurmoilUdpSocket {
+        self.inner.as_ref().expect("socket already dropped")
     }
 
-    fn sendmsg(
-        &mut self,
-        cx: Option<&mut Context>,
-        local_addr: &SocketAddr,
-        peer_addr: Option<SocketAddr>,
-        destination: &SocketAddr,
-        payload: &[io::IoSlice],
-        opts: super::SendOptions,
-        monitors: &Monitors,
-    ) -> io::Result<usize> {
-        let destination = if destination.is_unspecified() {
-            peer_addr.as_ref().ok_or_else(|| {
-                io::Error::new(io::ErrorKind::NotConnected, "Socket not connected")
-            })?
-        } else {
-            destination
-        };
-
-        let id = self.id;
-        self.id = self.id.wrapping_add(1);
-        let ttl = self.ttl;
-
-        if opts.source.is_some() {
-            todo!()
-        }
-
-        let header: Header = match (local_addr, destination) {
-            (SocketAddr::V4(src), SocketAddr::V4(dst)) => header::V4 {
-                source: *src.ip(),
-                destination: *dst.ip(),
-                dscp: 0,
-                ecn: opts.ecn,
-                df: true,
-                id,
-                ttl,
-            }
-            .into(),
-            (SocketAddr::V6(src), SocketAddr::V4(dst)) => header::V6 {
-                source: *src.ip(),
-                destination: dst.ip().to_ipv6_mapped(),
-                dscp: 0,
-                ecn: opts.ecn,
-                flow_label: 0,
-                hop_limit: ttl,
-            }
-            .into(),
-            (SocketAddr::V6(src), SocketAddr::V6(dst)) => header::V6 {
-                source: *src.ip(),
-                destination: *dst.ip(),
-                dscp: 0,
-                ecn: opts.ecn,
-                flow_label: 0,
-                hop_limit: ttl,
-            }
-            .into(),
-            (SocketAddr::V4(_), SocketAddr::V6(_)) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "cannot send IPv6 packet on IPv4 socket",
-                ))
-            }
-        };
-
-        let mut socket_write = SocketWrite {
-            local_addr,
-            peer_addr: destination,
-            transport: transport::Kind::Udp,
-            payload,
-            opts: &opts,
-        };
-
-        monitors.on_socket_write(&mut socket_write)?;
-
-        let transport = transport::Udp {
-            source: local_addr.port(),
-            destination: destination.port(),
-            payload: Default::default(),
-            checksum: 0,
-        };
-
-        let mut packet = SendablePacket {
-            header,
-            transport,
-            payload,
-            len: None,
-            segment_len: opts.segment_len,
-        };
-
-        if let Some(cx) = cx {
-            if self.channel.poll_push(cx, &mut packet)?.is_pending() {
-                return Err(io::ErrorKind::WouldBlock.into());
-            }
-        } else {
-            let mut channel = self.channel.clone();
-            let packet = packet.produce();
-            async move {
-                let _ = channel.push(packet).await;
-            }
-            .spawn();
-        }
-
-        Ok(packet.len.unwrap_or(0))
+    fn with_current<F, R>(&self, f: F) -> io::Result<R>
+    where
+        F: FnOnce() -> io::Result<R>,
+    {
+        set_current_group()?;
+        f()
     }
 }
 
-struct SendablePacket<'a> {
-    header: Header,
-    transport: transport::Udp,
-    payload: &'a [io::IoSlice<'a>],
-    len: Option<usize>,
-    segment_len: Option<usize>,
-}
+impl Drop for Socket {
+    fn drop(&mut self) {
+        self.monitors
+            .on_socket_closed(&self.local_addr, crate::net::monitor::Transport::Udp);
 
-impl Pushable<Segments> for SendablePacket<'_> {
-    fn produce(&mut self) -> Segments {
-        let len = if let Some(len) = self.len {
-            len
-        } else {
-            let len = self.payload.iter().map(|p| p.len()).sum();
-            self.len = Some(len);
-            len
+        let Some(inner) = self.inner.take() else {
+            return;
         };
 
-        let mut payload = Vec::with_capacity(len);
-        for chunk in self.payload {
-            payload.extend_from_slice(chunk);
+        let registry_available = registry::scope::try_borrow_with(|scope| scope.is_some());
+        if !registry_available {
+            std::mem::forget(inner);
+            return;
         }
 
-        let mut transport = self.transport.clone();
-        transport.payload = payload.into();
-
-        let packet = Packet {
-            header: self.header,
-            transport: transport.into(),
-        };
-
-        let segment_len = self.segment_len.unwrap_or(len).min(len);
-
-        Segments {
-            packet,
-            segment_len,
-        }
-    }
-}
-
-struct Receiver {
-    channel: channel::Receiver<Packet>,
-}
-
-impl Receiver {
-    fn new(channel: channel::Receiver<Packet>) -> Self {
-        Self { channel }
-    }
-
-    fn recvmsg(
-        &mut self,
-        mut cx: Option<&mut Context>,
-        peer_addr: Option<SocketAddr>,
-        payload: &mut [io::IoSliceMut],
-        opts: RecvOptions,
-        monitors: &Monitors,
-    ) -> io::Result<RecvResult> {
-        if opts.peek {
-            return Err(io::Error::new(
-                io::ErrorKind::Unsupported,
-                "peek is not currently implemented",
-            ));
-        }
-
-        loop {
-            let packet = if let Some(cx) = cx.as_mut() {
-                let res = self.channel.poll_pop(cx)?;
-                let Poll::Ready(v) = res else {
-                    return Err(io::ErrorKind::WouldBlock.into());
-                };
-                v
-            } else {
-                return Err(io::Error::new(
-                    io::ErrorKind::WouldBlock,
-                    "recvmsg without context is not currently implemented",
-                ));
-            };
-
-            let destination = packet.destination();
-            let source = packet.source();
-
-            if let Some(peer_addr) = peer_addr {
-                if source != peer_addr {
-                    count!("peer_mismatch");
-                    continue;
-                }
+        let mut inner = Some(inner);
+        let result = panic::catch_unwind(AssertUnwindSafe(|| {
+            if set_current_group().is_ok() {
+                drop(inner.take());
             }
+        }));
 
-            let (copied_len, truncation_len) = packet.transport.copy_payload_into(payload);
+        if let Some(inner) = inner.take() {
+            std::mem::forget(inner);
+        }
 
-            let mut res = RecvResult {
-                peer_addr: source,
-                local_addr: destination,
-                ecn: packet.header.ecn(),
-                len: copied_len,
-                // TODO gro
-                segment_len: copied_len,
-                truncation_len,
-            };
+        let _ = result;
+    }
+}
 
-            monitors.on_socket_read(&mut SocketRead {
-                result: &mut res,
-                payload: &mut *payload,
-            })?;
+fn set_current_group() -> io::Result<()> {
+    let group = crate::group::current();
+    registry::with_registry(|registry| registry.set_current_group(&group))
+}
 
-            return Ok(res);
+fn flatten_payload(payload: &[io::IoSlice]) -> Vec<u8> {
+    let len = payload.iter().map(|chunk| chunk.len()).sum();
+    let mut out = Vec::with_capacity(len);
+    for chunk in payload {
+        out.extend_from_slice(chunk);
+    }
+    out
+}
+
+fn segment_payload(payload: &[u8], segment_len: Option<usize>) -> Vec<Vec<u8>> {
+    match segment_len {
+        Some(segment_len) => payload.chunks(segment_len).map(ToOwned::to_owned).collect(),
+        None => vec![payload.to_vec()],
+    }
+}
+
+fn copy_payload(src: &[u8], dst: &mut [io::IoSliceMut]) -> usize {
+    let mut copied = 0;
+    let mut remaining = src;
+
+    for chunk in dst {
+        let len = chunk.len().min(remaining.len());
+        chunk[..len].copy_from_slice(&remaining[..len]);
+        copied += len;
+        remaining = &remaining[len..];
+
+        if remaining.is_empty() {
+            break;
         }
     }
+
+    copied
+}
+
+fn monitor_packet(packet: &turmoil_net::Packet) -> Option<crate::environment::net::ip::Packet> {
+    registry::monitor_packet(packet)
 }

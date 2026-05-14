@@ -20,9 +20,24 @@ macro_rules! define {
 
             #[allow(dead_code)]
             pub fn with<F: FnOnce() -> R, R>(value: $ty, f: F) -> ($ty, R) {
+                struct Reset {
+                    prev: Option<$ty>,
+                    active: bool,
+                }
+
+                impl Drop for Reset {
+                    fn drop(&mut self) {
+                        if self.active {
+                            let _ = set(self.prev.take());
+                        }
+                    }
+                }
+
                 let prev = set(Some(value));
+                let mut reset = Reset { prev, active: true };
                 let res = f();
-                let value = set(prev).unwrap();
+                let value = set(reset.prev.take()).unwrap();
+                reset.active = false;
                 (value, res)
             }
 
