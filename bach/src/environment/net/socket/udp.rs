@@ -16,11 +16,13 @@ use core::{
 };
 use std::{
     io,
+    panic::{self, AssertUnwindSafe},
     sync::Mutex,
 };
+use turmoil_net::shim::tokio::net::UdpSocket as TurmoilUdpSocket;
 
 pub struct Socket {
-    inner: turmoil_net::UdpSocket,
+    inner: Option<TurmoilUdpSocket>,
     local_addr: SocketAddr,
     peer_addr: Mutex<Option<SocketAddr>>,
     monitors: Monitors,
@@ -28,17 +30,15 @@ pub struct Socket {
 
 macro_rules! lock {
     ($lock:expr) => {
-        $lock
-            .lock()
-            .map_err(|e| io::Error::other(format!("{e}")))?
+        $lock.lock().map_err(|e| io::Error::other(format!("{e}")))?
     };
 }
 
 impl Socket {
-    pub fn new(inner: turmoil_net::UdpSocket, monitors: Monitors) -> io::Result<Self> {
+    pub fn new(inner: TurmoilUdpSocket, monitors: Monitors) -> io::Result<Self> {
         let local_addr = inner.local_addr()?;
         Ok(Self {
-            inner,
+            inner: Some(inner),
             local_addr,
             peer_addr: Mutex::new(None),
             monitors,
@@ -50,7 +50,7 @@ impl socket::Socket for Socket {
     fn poll_connect(&self, cx: &mut Context, peer_addr: SocketAddr) -> Poll<io::Result<()>> {
         set_current_group()?;
 
-        let mut future = pin!(self.inner.connect(peer_addr));
+        let mut future = pin!(self.inner().connect(peer_addr));
         match Future::poll(future.as_mut(), cx) {
             Poll::Ready(Ok(())) => {
                 *lock!(self.peer_addr) = Some(peer_addr);
@@ -65,7 +65,7 @@ impl socket::Socket for Socket {
         if let Some(peer_addr) = *lock!(self.peer_addr) {
             Ok(peer_addr)
         } else {
-            self.with_current(|| self.inner.peer_addr())
+            self.with_current(|| self.inner().peer_addr())
         }
     }
 
@@ -134,28 +134,78 @@ impl socket::Socket for Socket {
 
         let payload = flatten_payload(payload);
         let segments = segment_payload(&payload, opts.segment_len);
+        let mut cx = cx;
 
         self.with_current(|| {
             let mut sent = 0;
 
             for segment in &segments {
-                let len = if let Some(cx) = cx {
-                    let mut future = pin!(self.inner.send_to(segment, destination));
+                let len = if let Some(cx) = cx.as_deref_mut() {
+                    let mut future = pin!(self.inner().send_to(segment, destination));
                     match Future::poll(future.as_mut(), cx) {
                         Poll::Ready(res) => res?,
                         Poll::Pending => return Err(io::ErrorKind::WouldBlock.into()),
                     }
                 } else {
-                    self.inner.try_send_to(segment, destination)?
+                    self.inner().try_send_to(segment, destination)?
                 };
 
                 sent += len;
             }
 
-            registry::with_registry(|registry| {
-                registry.drive();
-                Ok(())
+            let (monitors, packets) = registry::with_registry(|registry| {
+                Ok((registry.monitors(), registry.drain_packets()))
             })?;
+            let mut panic_payload = None;
+
+            for packet in packets {
+                let Some(monitor_packet) = monitor_packet(&packet) else {
+                    registry::with_registry(|registry| {
+                        registry.deliver(packet);
+                        Ok(())
+                    })?;
+                    continue;
+                };
+
+                let sent = panic::catch_unwind(AssertUnwindSafe(|| {
+                    monitors.on_packet_sent(&monitor_packet)
+                }));
+                let sent = match sent {
+                    Ok(command) => command,
+                    Err(payload) => {
+                        panic_payload = Some(payload);
+                        break;
+                    }
+                };
+
+                if sent.is_drop() {
+                    continue;
+                }
+
+                let received = panic::catch_unwind(AssertUnwindSafe(|| {
+                    monitors.on_packet_received(&monitor_packet)
+                }));
+                let received = match received {
+                    Ok(command) => command,
+                    Err(payload) => {
+                        panic_payload = Some(payload);
+                        break;
+                    }
+                };
+
+                if received.is_drop() {
+                    continue;
+                }
+
+                registry::with_registry(|registry| {
+                    registry.deliver(packet);
+                    Ok(())
+                })?;
+            }
+
+            if let Some(payload) = panic_payload {
+                panic::resume_unwind(payload);
+            }
 
             Ok(sent)
         })
@@ -186,19 +236,19 @@ impl socket::Socket for Socket {
             }
 
             if opts.peek {
-                let mut future = pin!(self.inner.peek_from(&mut buffer));
+                let mut future = pin!(self.inner().peek_from(&mut buffer));
                 match Future::poll(future.as_mut(), cx.expect("peek requires a task context")) {
                     Poll::Ready(res) => res,
                     Poll::Pending => Err(io::ErrorKind::WouldBlock.into()),
                 }
             } else if let Some(cx) = cx {
-                let mut future = pin!(self.inner.recv_from(&mut buffer));
+                let mut future = pin!(self.inner().recv_from(&mut buffer));
                 match Future::poll(future.as_mut(), cx) {
                     Poll::Ready(res) => res,
                     Poll::Pending => Err(io::ErrorKind::WouldBlock.into()),
                 }
             } else {
-                self.inner.try_recv_from(&mut buffer)
+                self.inner().try_recv_from(&mut buffer)
             }
         })?;
 
@@ -228,6 +278,10 @@ impl socket::Socket for Socket {
 }
 
 impl Socket {
+    fn inner(&self) -> &TurmoilUdpSocket {
+        self.inner.as_ref().expect("socket already dropped")
+    }
+
     fn with_current<F, R>(&self, f: F) -> io::Result<R>
     where
         F: FnOnce() -> io::Result<R>,
@@ -241,6 +295,29 @@ impl Drop for Socket {
     fn drop(&mut self) {
         self.monitors
             .on_socket_closed(&self.local_addr, crate::net::monitor::Transport::Udp);
+
+        let Some(inner) = self.inner.take() else {
+            return;
+        };
+
+        let registry_available = registry::scope::try_borrow_with(|scope| scope.is_some());
+        if !registry_available {
+            std::mem::forget(inner);
+            return;
+        }
+
+        let mut inner = Some(inner);
+        let result = panic::catch_unwind(AssertUnwindSafe(|| {
+            if set_current_group().is_ok() {
+                drop(inner.take());
+            }
+        }));
+
+        if let Some(inner) = inner.take() {
+            std::mem::forget(inner);
+        }
+
+        let _ = result;
     }
 }
 
@@ -282,4 +359,8 @@ fn copy_payload(src: &[u8], dst: &mut [io::IoSliceMut]) -> usize {
     }
 
     copied
+}
+
+fn monitor_packet(packet: &turmoil_net::Packet) -> Option<crate::environment::net::ip::Packet> {
+    registry::monitor_packet(packet)
 }

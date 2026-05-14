@@ -9,13 +9,12 @@ use crate::{
     net::{monitor::Monitor, IpAddr},
     scope::define,
 };
+use core::{future::Future, pin::pin, task::Context};
 use std::{collections::HashMap, io};
 
-use super::{
-    ip::{header, transport, Packet, Transport},
-    monitor::DropReason,
-};
+use super::ip::{header, transport, Packet, Transport};
 use bytes::Bytes;
+use turmoil_net::shim::tokio::net::UdpSocket as TurmoilUdpSocket;
 use turmoil_net::{EnterGuard, HostId, Net};
 
 define!(scope, Box<Registry>);
@@ -132,7 +131,7 @@ impl Registry {
         self.monitors
             .on_socket_opened(&local_addr, transport::Kind::Udp)?;
 
-        let socket = turmoil_net::UdpSocket::bind(local_addr)?;
+        let socket = bind_udp_socket(local_addr)?;
         let socket = UdpSocket::new(socket, self.monitors.clone())?;
         Ok(Box::new(socket))
     }
@@ -149,30 +148,24 @@ impl Registry {
         Ok(())
     }
 
-    pub fn drive(&mut self) {
+    pub fn drain_packets(&self) -> Vec<turmoil_net::Packet> {
         let Some(guard) = self.guard.as_ref() else {
-            return;
+            return Vec::new();
         };
 
         let mut packets = Vec::new();
         guard.egress_all(&mut packets);
+        packets
+    }
 
-        for packet in packets {
-            let Some(monitor_packet) = monitor_packet(&packet) else {
-                guard.deliver(packet);
-                continue;
-            };
-
-            if self.monitors.on_packet_sent(&monitor_packet).is_drop() {
-                continue;
-            }
-
-            if self.monitors.on_packet_received(&monitor_packet).is_drop() {
-                continue;
-            }
-
+    pub fn deliver(&self, packet: turmoil_net::Packet) {
+        if let Some(guard) = self.guard.as_ref() {
             guard.deliver(packet);
         }
+    }
+
+    pub fn monitors(&self) -> Monitors {
+        self.monitors.clone()
     }
 
     fn prepare(&mut self) -> io::Result<()> {
@@ -225,7 +218,7 @@ impl Registry {
     }
 }
 
-fn monitor_packet(packet: &turmoil_net::Packet) -> Option<Packet> {
+pub(crate) fn monitor_packet(packet: &turmoil_net::Packet) -> Option<Packet> {
     let transport = match &packet.payload {
         turmoil_net::Transport::Udp(udp) => Transport::Udp(transport::Udp {
             source: udp.src_port,
@@ -279,4 +272,17 @@ fn monitor_packet(packet: &turmoil_net::Packet) -> Option<Packet> {
     let mut packet = Packet { header, transport };
     packet.update_checksum();
     Some(packet)
+}
+
+fn bind_udp_socket(local_addr: std::net::SocketAddr) -> io::Result<TurmoilUdpSocket> {
+    let mut future = pin!(TurmoilUdpSocket::bind(local_addr));
+    let waker = crate::task::waker::noop();
+    let mut cx = Context::from_waker(&waker);
+
+    match Future::poll(future.as_mut(), &mut cx) {
+        core::task::Poll::Ready(result) => result,
+        core::task::Poll::Pending => Err(io::Error::other(
+            "turmoil-net UDP bind unexpectedly returned pending",
+        )),
+    }
 }
