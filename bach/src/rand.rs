@@ -34,8 +34,9 @@ mod standard {
         }
 
         fn fill_bytes(&mut self, dst: &mut [u8]) {
-            if let Err(err) = self.0.try_fill_bytes(dst) {
-                match err {}
+            match self.0.try_fill_bytes(dst) {
+                Ok(()) => {}
+                Err(err) => match err {},
             }
         }
     }
