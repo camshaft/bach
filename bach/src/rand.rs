@@ -10,15 +10,44 @@ pub use bolero_generator::prelude::*;
 #[cfg(not(kani))]
 mod standard {
     use bolero_generator::driver;
-    use rand_xoshiro::{rand_core::SeedableRng, Xoshiro256PlusPlus};
+    use rand_core_compat::RngCore;
+    use rand_xoshiro::{
+        rand_core::{SeedableRng, TryRng},
+        Xoshiro256PlusPlus,
+    };
+
+    struct CompatRng(Xoshiro256PlusPlus);
+
+    impl RngCore for CompatRng {
+        fn next_u32(&mut self) -> u32 {
+            match self.0.try_next_u32() {
+                Ok(value) => value,
+                Err(err) => match err {},
+            }
+        }
+
+        fn next_u64(&mut self) -> u64 {
+            match self.0.try_next_u64() {
+                Ok(value) => value,
+                Err(err) => match err {},
+            }
+        }
+
+        fn fill_bytes(&mut self, dst: &mut [u8]) {
+            match self.0.try_fill_bytes(dst) {
+                Ok(()) => {}
+                Err(err) => match err {},
+            }
+        }
+    }
 
     pub struct Scope {
-        driver: Option<Box<driver::object::Object<driver::Rng<Xoshiro256PlusPlus>>>>,
+        driver: Option<Box<driver::object::Object<driver::Rng<CompatRng>>>>,
     }
 
     impl Scope {
         pub fn new(seed: u64) -> Self {
-            let rng = Xoshiro256PlusPlus::seed_from_u64(seed);
+            let rng = CompatRng(Xoshiro256PlusPlus::seed_from_u64(seed));
             let options = driver::Options::default().with_max_len(usize::MAX);
             let driver = driver::Rng::new(rng, &options);
             let driver = driver::object::Object(driver);
