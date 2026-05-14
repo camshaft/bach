@@ -63,6 +63,8 @@ impl Registry {
     }
 
     pub fn set_pcap_dir<P: Into<std::path::PathBuf>>(&mut self, pcap: P) -> io::Result<()> {
+        // The first-pass turmoil-net backend does not emit PCAP files yet, but keep the
+        // builder method available so existing callers continue to compile.
         let _ = pcap.into();
         Ok(())
     }

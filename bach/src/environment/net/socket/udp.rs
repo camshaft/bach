@@ -117,6 +117,13 @@ impl socket::Socket for Socket {
             ));
         }
 
+        if opts.segment_len == Some(0) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "segment_len must be greater than zero",
+            ));
+        }
+
         let destination = if destination.ip().is_unspecified() || destination.port() == 0 {
             self.peer_addr()?
         } else {
@@ -337,7 +344,6 @@ fn flatten_payload(payload: &[io::IoSlice]) -> Vec<u8> {
 
 fn segment_payload(payload: &[u8], segment_len: Option<usize>) -> Vec<Vec<u8>> {
     match segment_len {
-        Some(0) => vec![payload.to_vec()],
         Some(segment_len) => payload.chunks(segment_len).map(ToOwned::to_owned).collect(),
         None => vec![payload.to_vec()],
     }
