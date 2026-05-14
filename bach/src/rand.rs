@@ -10,7 +10,7 @@ pub use bolero_generator::prelude::*;
 #[cfg(not(kani))]
 mod standard {
     use bolero_generator::driver;
-    use rand::RngCore;
+    use rand_core_09::RngCore;
     use rand_xoshiro::{
         rand_core::{SeedableRng, TryRng},
         Xoshiro256PlusPlus,

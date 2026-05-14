@@ -4,7 +4,9 @@ use bach::{
     time::{sleep, Instant},
 };
 use bolero::{check, produce};
+use futures::future;
 use std::{
+    pin::pin,
     task::{Context, Poll},
     time::Duration,
 };
@@ -160,6 +162,36 @@ fn instant_zero() {
             sleep(Duration::from_secs(1)).await;
             let after_sleep = Instant::now();
             assert_eq!(after_sleep, zero + Duration::from_secs(1));
+        }
+        .primary()
+        .spawn();
+    });
+}
+
+/// Regression test: many short-lived timers at fine granularities (1 µs) that
+/// are cancelled immediately after being registered must not cause the timing
+/// wheel to panic with "advance iterated too many times".
+///
+/// Each `select` call polls the 1 µs sleep once – inserting the entry into
+/// the scheduler queue – then immediately drops it via the `ready(())` branch,
+/// marking the entry as cancelled.  The scheduler later moves those cancelled
+/// entries into the wheel during `collect()`.  Without the fix, advancing the
+/// wheel past those entries could exhaust the iteration budget.
+#[test]
+fn many_cancelled_fine_granularity_timers() {
+    sim(|| {
+        async {
+            for _ in 0..2_000 {
+                // Racing a 1 µs sleep against an already-complete future
+                // polls the sleep once (registering it in the wheel) and then
+                // drops it (cancelling it), replicating the pattern that
+                // triggers the panic.
+                future::select(pin!(sleep(Duration::from_nanos(1_000))), pin!(future::ready(()))).await;
+            }
+
+            // The simulation must be able to advance past all the cancelled
+            // entries to reach this real timer.
+            sleep(Duration::from_millis(10)).await;
         }
         .primary()
         .spawn();
