@@ -24,7 +24,7 @@ pub mod atomic {
     };
     use intrusive_collections::{intrusive_adapter, LinkedList, LinkedListLink};
 
-    intrusive_adapter!(pub Adapter = ArcEntry: Entry { link: LinkedListLink });
+    intrusive_adapter!(pub Adapter = ArcEntry: Entry { link => LinkedListLink });
 
     pub type ArcEntry = Arc<Entry>;
 
