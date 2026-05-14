@@ -2,9 +2,8 @@ use crate::{
     environment::net::{
         ip,
         monitor::List as Monitors,
-        port,
-        queue::{self, Dispatch},
-        socket::{self, reservation},
+        queue,
+        socket::{self, udp::Socket as UdpSocket},
     },
     group::Group,
     net::{monitor::Monitor, IpAddr},
@@ -12,7 +11,12 @@ use crate::{
 };
 use std::{collections::HashMap, io};
 
-use super::{ip::transport, pcap};
+use super::{
+    ip::{header, transport, Packet, Transport},
+    monitor::DropReason,
+};
+use bytes::Bytes;
+use turmoil_net::{EnterGuard, HostId, Net};
 
 define!(scope, Box<Registry>);
 
@@ -28,12 +32,12 @@ pub(crate) fn with_registry<F: FnOnce(&mut Registry) -> io::Result<R>, R>(f: F) 
 
 pub struct Registry {
     hostnames: HashMap<String, (Group, IpAddr)>,
-    senders: Dispatch,
-    groups: HashMap<Group, GroupState>,
+    group_ids: HashMap<Group, HostId>,
     ips: ip::Allocator,
-    pcaps: pcap::Registry,
-    queue_alloc: Box<dyn queue::Allocator>,
     monitors: Monitors,
+    #[allow(dead_code)]
+    queue_alloc: Box<dyn queue::Allocator>,
+    guard: Option<EnterGuard>,
 }
 
 impl Default for Registry {
@@ -47,12 +51,11 @@ impl Registry {
         let monitors = Monitors::default();
         Self {
             hostnames: HashMap::new(),
-            senders: Dispatch::new(monitors.clone()),
-            groups: HashMap::new(),
+            group_ids: HashMap::new(),
             ips: ip::Allocator::default(),
-            pcaps: Default::default(),
             queue_alloc: queue,
             monitors,
+            guard: None,
         }
     }
 
@@ -61,7 +64,8 @@ impl Registry {
     }
 
     pub fn set_pcap_dir<P: Into<std::path::PathBuf>>(&mut self, pcap: P) -> io::Result<()> {
-        self.pcaps.set_dir(pcap)
+        let _ = pcap.into();
+        Ok(())
     }
 
     pub fn set_subnet(&mut self, subnet: IpAddr) {
@@ -80,23 +84,10 @@ impl Registry {
             }
         }
 
-        if let Some((owner, ip)) = self.hostnames.get(name).cloned() {
-            // the owner would have already resolved itself in the pcap
-            if owner == *group {
+        if let Some((owner, ip)) = self.hostnames.get(name).copied() {
+            if owner == *group || self.guard.is_none() {
                 return Ok(ip);
             }
-
-            let group_name = group.name();
-
-            // inject a DNS packet in the pcap
-            let first_time = self.pcaps.dns(group, name, &ip);
-
-            // if this is the first time `group` has queried `name`, then do a reverse query
-            // on the owner so the pcaps come through correctly on the other side
-            if first_time {
-                let _ = self.resolve_host(&owner, &group_name);
-            }
-
             return Ok(ip);
         }
 
@@ -111,13 +102,7 @@ impl Registry {
             ));
         }
 
-        let ip = self.ips.allocate();
-        self.hostnames.insert(group_name, (*group, ip));
-        self.groups.insert(*group, GroupState::default());
-
-        self.pcaps.dns(group, name, &ip);
-
-        Ok(ip)
+        self.ensure_group_host(group)
     }
 
     pub fn register_monitor<M: Monitor>(&mut self, monitor: M) {
@@ -129,7 +114,9 @@ impl Registry {
         group: &Group,
         options: &socket::Options,
     ) -> std::io::Result<Box<dyn socket::Socket>> {
-        let group_ip = self.resolve_host(group, &group.name())?;
+        let group_ip = self.ensure_group_host(group)?;
+        self.prepare()?;
+        self.set_current_group(group)?;
 
         let mut local_addr = options.local_addr;
 
@@ -142,40 +129,154 @@ impl Registry {
             ));
         }
 
-        let state = self.groups.get_mut(group).unwrap();
-
-        let reservation = if local_addr.port() == 0 {
-            let res = state.udp.ephemeral()?;
-            local_addr.set_port(res.port());
-            res
-        } else {
-            state.udp.reserve(local_addr.port(), options.reuse_port)?
-        };
-
         self.monitors
             .on_socket_opened(&local_addr, transport::Kind::Udp)?;
 
-        let queue::PacketQueue {
-            local_sender: sender,
-            local_receiver: receiver,
-            remote_sender,
-        } = self.queue_alloc.for_udp(
-            group,
-            local_addr,
-            &self.senders,
-            &self.monitors,
-            &mut self.pcaps,
-        );
-
-        let reservation = (reservation, self.senders.reserve(local_addr, remote_sender));
-        let socket = socket::udp::Socket::new(sender, receiver, local_addr, self.monitors.clone());
-        let socket = reservation::Socket::new(socket, reservation);
-
+        let socket = turmoil_net::UdpSocket::bind(local_addr)?;
+        let socket = UdpSocket::new(socket, self.monitors.clone())?;
         Ok(Box::new(socket))
+    }
+
+    pub fn set_current_group(&mut self, group: &Group) -> io::Result<()> {
+        self.prepare()?;
+        let Some(host_id) = self.group_ids.get(group).copied() else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("group `{group}` is not registered in turmoil-net"),
+            ));
+        };
+        turmoil_net::set_current(host_id);
+        Ok(())
+    }
+
+    pub fn drive(&mut self) {
+        let Some(guard) = self.guard.as_ref() else {
+            return;
+        };
+
+        let mut packets = Vec::new();
+        guard.egress_all(&mut packets);
+
+        for packet in packets {
+            let Some(monitor_packet) = monitor_packet(&packet) else {
+                guard.deliver(packet);
+                continue;
+            };
+
+            if self.monitors.on_packet_sent(&monitor_packet).is_drop() {
+                continue;
+            }
+
+            if self.monitors.on_packet_received(&monitor_packet).is_drop() {
+                continue;
+            }
+
+            guard.deliver(packet);
+        }
+    }
+
+    fn prepare(&mut self) -> io::Result<()> {
+        if self.guard.is_some() {
+            return Ok(());
+        }
+
+        let mut groups = crate::group::list();
+        groups.sort_by_key(Group::id);
+
+        for group in groups {
+            let _ = self.ensure_group_host(&group)?;
+        }
+
+        let mut hosts = self
+            .hostnames
+            .values()
+            .copied()
+            .collect::<Vec<(Group, IpAddr)>>();
+        hosts.sort_by_key(|(group, _)| group.id());
+
+        let mut net = Net::new();
+        let mut group_ids = HashMap::with_capacity(hosts.len());
+
+        for (group, ip) in hosts {
+            let host_id = net.add_host(ip);
+            group_ids.insert(group, host_id);
+        }
+
+        self.group_ids = group_ids;
+        self.guard = Some(net.enter());
+        Ok(())
+    }
+
+    fn ensure_group_host(&mut self, group: &Group) -> io::Result<IpAddr> {
+        let name = group.name();
+        if let Some((_, ip)) = self.hostnames.get(&name).copied() {
+            return Ok(ip);
+        }
+
+        if self.guard.is_some() {
+            return Err(io::Error::other(
+                "adding new groups after turmoil-net initialization is not yet supported",
+            ));
+        }
+
+        let ip = self.ips.allocate();
+        self.hostnames.insert(name, (*group, ip));
+        Ok(ip)
     }
 }
 
-#[derive(Default)]
-struct GroupState {
-    udp: port::Allocator,
+fn monitor_packet(packet: &turmoil_net::Packet) -> Option<Packet> {
+    let transport = match &packet.payload {
+        turmoil_net::Transport::Udp(udp) => Transport::Udp(transport::Udp {
+            source: udp.src_port,
+            destination: udp.dst_port,
+            payload: Bytes::clone(&udp.payload),
+            checksum: 0,
+        }),
+        turmoil_net::Transport::Tcp(_) => return None,
+    };
+
+    let header = match (packet.src, packet.dst) {
+        (IpAddr::V4(source), IpAddr::V4(destination)) => header::V4 {
+            source,
+            destination,
+            dscp: 0,
+            ecn: 0,
+            df: true,
+            id: 0,
+            ttl: packet.ttl,
+        }
+        .into(),
+        (IpAddr::V6(source), IpAddr::V6(destination)) => header::V6 {
+            source,
+            destination,
+            dscp: 0,
+            ecn: 0,
+            flow_label: 0,
+            hop_limit: packet.ttl,
+        }
+        .into(),
+        (IpAddr::V4(source), IpAddr::V6(destination)) => header::V6 {
+            source: source.to_ipv6_mapped(),
+            destination,
+            dscp: 0,
+            ecn: 0,
+            flow_label: 0,
+            hop_limit: packet.ttl,
+        }
+        .into(),
+        (IpAddr::V6(source), IpAddr::V4(destination)) => header::V6 {
+            source,
+            destination: destination.to_ipv6_mapped(),
+            dscp: 0,
+            ecn: 0,
+            flow_label: 0,
+            hop_limit: packet.ttl,
+        }
+        .into(),
+    };
+
+    let mut packet = Packet { header, transport };
+    packet.update_checksum();
+    Some(packet)
 }

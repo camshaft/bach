@@ -13,7 +13,7 @@ default = ["net"]
 coop = []
 full = ["coop", "metrics", "net", "net-monitor", "tracing"]
 metrics = ["dep:metrics"]
-net = ["dep:bytes", "dep:s2n-quic-core", "dep:siphasher"]
+net = ["dep:bytes", "dep:s2n-quic-core", "dep:siphasher", "dep:turmoil-net"]
 net-monitor = []
 tokio-compat = ["tokio/time"]
 tracing = ["dep:tracing"]
@@ -36,6 +36,7 @@ siphasher = { version = "1", default-features = false, optional = true }
 slotmap = "1"
 tokio = { version = "1", default-features = false, features = ["sync"] }
 tracing = { version = "0.1", optional = true }
+turmoil-net = { version = "0.1.0", optional = true }
 
 [dev-dependencies]
 bolero.workspace = true
