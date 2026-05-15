@@ -1,5 +1,5 @@
 use crate::environment::net::{fmt::Hex, registry::with_registry};
-use core::fmt;
+use core::{fmt, time::Duration};
 use std::{io, net::SocketAddr};
 
 pub use crate::environment::net::ip::{transport::Kind as Transport, Packet};
@@ -14,18 +14,89 @@ pub enum Command {
     Pass,
     /// Drops the packet
     Drop,
+    /// Delays the packet
+    Delay(Delay),
+    /// Creates duplicate packets
+    Duplicate(Duplicate),
 }
 
 impl Command {
     #[inline(always)]
-    pub fn is_pass(self) -> bool {
+    pub fn is_pass(&self) -> bool {
         matches!(self, Self::Pass)
     }
 
     #[inline(always)]
-    pub fn is_drop(self) -> bool {
+    pub fn is_drop(&self) -> bool {
         matches!(self, Self::Drop)
     }
+}
+
+#[inline(always)]
+pub fn delay(duration: Duration) -> Delay {
+    Delay {
+        duration,
+        offset: Offset::Relative,
+    }
+}
+
+#[inline(always)]
+pub fn duplicate(count: usize) -> Duplicate {
+    Duplicate {
+        count,
+        offset: Offset::Relative,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Delay {
+    pub duration: Duration,
+    pub offset: Offset,
+}
+
+impl Delay {
+    #[inline(always)]
+    pub fn absolute(mut self) -> Self {
+        self.offset = Offset::Absolute;
+        self
+    }
+}
+
+impl From<Delay> for Command {
+    fn from(delay: Delay) -> Self {
+        Command::Delay(delay)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Duplicate {
+    pub count: usize,
+    pub offset: Offset,
+}
+
+impl Duplicate {
+    #[inline(always)]
+    pub fn absolute(mut self) -> Self {
+        self.offset = Offset::Absolute;
+        self
+    }
+}
+
+impl From<Duplicate> for Command {
+    fn from(dup: Duplicate) -> Self {
+        Command::Duplicate(dup)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Offset {
+    /// Delay is independent of the base/parent delay
+    Absolute,
+    /// Delay is added on top of the base/parent delay
+    #[default]
+    Relative,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

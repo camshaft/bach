@@ -70,6 +70,7 @@ mod tests {
                 checksum: 0,
             }
             .into(),
+            is_duplicate: false,
         };
 
         let segments = Segments {

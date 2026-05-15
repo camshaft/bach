@@ -61,6 +61,10 @@ impl AsPcap for u32 {
     }
 }
 
+pub trait Record {
+    fn write_pcap_record<O: io::Write>(&mut self, writer: &mut Writer<O>) -> io::Result<()>;
+}
+
 impl AsPcap for [u8] {
     fn as_pcap<W: io::Write>(&self, out: &mut W) -> io::Result<()> {
         out.write_all(self)
