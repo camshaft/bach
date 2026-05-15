@@ -1,6 +1,5 @@
 use crate::environment::net::pcap::AsPcap;
 use bytes::Bytes;
-use s2n_quic_core::inet::Protocol;
 use std::io::{self, IoSliceMut};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -53,10 +52,11 @@ impl Transport {
         }
     }
 
-    pub fn protocol(&self) -> Protocol {
+    pub fn protocol(&self) -> u8 {
         match self {
-            Transport::Tcp(_) => Protocol::TCP,
-            Transport::Udp(_) => Protocol::UDP,
+            // https://www.iana.org/assignments/protocol-numbers
+            Transport::Tcp(_) => 6,
+            Transport::Udp(_) => 17,
         }
     }
 

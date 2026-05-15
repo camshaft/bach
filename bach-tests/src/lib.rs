@@ -1,7 +1,6 @@
 #[cfg(feature = "leaks")]
 #[global_allocator]
 static ALLOC: checkers::Allocator = checkers::Allocator::system();
-use std::backtrace::BacktraceStatus;
 
 macro_rules! tests {
     ($($(#[cfg($($tt:tt)*)])? $name:ident),* $(,)?) => {
@@ -38,6 +37,7 @@ pub fn sim<F: FnOnce()>(f: F) {
 #[cfg(feature = "leaks")]
 pub fn sim<F: FnOnce()>(f: F) {
     use checkers::Violation;
+    use std::backtrace::BacktraceStatus;
 
     let snapshot = checkers::with(|| {
         bach::sim(f);

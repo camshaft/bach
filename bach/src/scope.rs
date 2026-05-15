@@ -65,8 +65,6 @@ pub use define;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     define!(my_scope, u64);
 
     #[test]

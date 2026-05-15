@@ -3,11 +3,6 @@ use crate::{
     environment::net::pcap::AsPcap,
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
 };
-use core::mem::size_of;
-use s2n_quic_core::{
-    havoc::{Encoder, EncoderBuffer},
-    inet::{ipv4, ipv6, ExplicitCongestionNotification},
-};
 use std::io;
 
 #[derive(Clone, Debug, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -114,7 +109,7 @@ impl V4 {
     }
 
     fn as_pcap<O: io::Write>(&self, out: &mut O, transport: &Transport) -> io::Result<()> {
-        const HEADER_LEN: usize = size_of::<ipv4::Header>();
+        const HEADER_LEN: usize = 20;
 
         let mut buffer = [0u8; HEADER_LEN];
 
@@ -127,33 +122,38 @@ impl V4 {
             )
         })?;
 
-        {
-            let mut buffer = EncoderBuffer::new(&mut buffer);
-            buffer.write_zerocopy(|header: &mut ipv4::Header| {
-                header.vihl_mut().set_version(4).set_header_len(5);
-                header
-                    .tos_mut()
-                    .set_dscp(self.dscp)
-                    .set_ecn(ExplicitCongestionNotification::new(self.ecn));
-                header
-                    .flag_fragment_mut()
-                    .set_reserved(false)
-                    .set_dont_fragment(self.df)
-                    .set_more_fragments(false)
-                    .set_fragment_offset(0);
-                header.id_mut().set(self.id);
-                header.total_len_mut().set(total_len);
-                *header.ttl_mut() = self.ttl;
-                // set the checksum to zero for the initial pass
-                header.checksum_mut().set(0);
-                *header.protocol_mut() = transport.protocol();
-                *header.source_mut() = self.source.octets().into();
-                *header.destination_mut() = self.destination.octets().into();
+        // version (4) + IHL (5 = 20 bytes)
+        buffer[0] = (4 << 4) | 5;
+        // DSCP (6 bits) + ECN (2 bits)
+        buffer[1] = ((self.dscp & 0x3F) << 2) | (self.ecn & 0x03);
+        // total length
+        buffer[2..4].copy_from_slice(&total_len.to_be_bytes());
+        // identification
+        buffer[4..6].copy_from_slice(&self.id.to_be_bytes());
+        // flags (3 bits) + fragment offset (13 bits)
+        let flags: u16 = if self.df { 0x4000 } else { 0 };
+        buffer[6..8].copy_from_slice(&flags.to_be_bytes());
+        // TTL
+        buffer[8] = self.ttl;
+        // protocol
+        buffer[9] = transport.protocol();
+        // checksum (zero for initial calculation)
+        buffer[10..12].copy_from_slice(&[0, 0]);
+        // source address
+        buffer[12..16].copy_from_slice(&self.source.octets());
+        // destination address
+        buffer[16..20].copy_from_slice(&self.destination.octets());
 
-                // calculate the IPv4 header checksum
-                header.update_checksum();
-            });
+        // calculate IPv4 header checksum
+        let mut sum: u32 = 0;
+        for i in (0..HEADER_LEN).step_by(2) {
+            sum += u16::from_be_bytes([buffer[i], buffer[i + 1]]) as u32;
         }
+        while sum >> 16 != 0 {
+            sum = (sum & 0xFFFF) + (sum >> 16);
+        }
+        let checksum = !(sum as u16);
+        buffer[10..12].copy_from_slice(&checksum.to_be_bytes());
 
         out.write_all(&buffer)?;
 
@@ -200,33 +200,31 @@ impl V6 {
     }
 
     fn as_pcap<O: io::Write>(&self, out: &mut O, transport: &Transport) -> io::Result<()> {
-        const HEADER_LEN: usize = size_of::<ipv6::Header>();
+        const HEADER_LEN: usize = 40;
 
         let mut buffer = [0u8; HEADER_LEN];
 
-        let payload_len = transport.pcap_len()?.try_into().map_err(|_| {
+        let payload_len: u16 = transport.pcap_len()?.try_into().map_err(|_| {
             io::Error::new(
                 io::ErrorKind::InvalidData,
                 "total length too large for IPv6 payload",
             )
         })?;
 
-        {
-            let mut buffer = EncoderBuffer::new(&mut buffer);
-            buffer.write_zerocopy(|header: &mut ipv6::Header| {
-                header
-                    .vtcfl_mut()
-                    .set_version(6)
-                    .set_dscp(self.dscp)
-                    .set_ecn(ExplicitCongestionNotification::new(self.ecn))
-                    .set_flow_label(self.flow_label);
-                header.payload_len_mut().set(payload_len);
-                *header.next_header_mut() = transport.protocol();
-                *header.hop_limit_mut() = self.hop_limit;
-                *header.source_mut() = self.source.octets().into();
-                *header.destination_mut() = self.destination.octets().into();
-            });
-        }
+        // version (4 bits) + traffic class (8 bits: DSCP 6 + ECN 2) + flow label (20 bits)
+        let tc = ((self.dscp as u32 & 0x3F) << 2) | (self.ecn as u32 & 0x03);
+        let vtcfl: u32 = (6 << 28) | (tc << 20) | (self.flow_label & 0x000F_FFFF);
+        buffer[0..4].copy_from_slice(&vtcfl.to_be_bytes());
+        // payload length
+        buffer[4..6].copy_from_slice(&payload_len.to_be_bytes());
+        // next header (protocol)
+        buffer[6] = transport.protocol();
+        // hop limit
+        buffer[7] = self.hop_limit;
+        // source address (16 bytes)
+        buffer[8..24].copy_from_slice(&self.source.octets());
+        // destination address (16 bytes)
+        buffer[24..40].copy_from_slice(&self.destination.octets());
 
         out.write_all(&buffer)?;
 
