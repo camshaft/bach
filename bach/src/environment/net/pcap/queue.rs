@@ -1,7 +1,8 @@
 use crate::{
-    environment::net::{ip::Packet, pcap::Writer},
+    environment::net::pcap::{Record, Writer},
     queue::{CloseError, PopError, PushError, Pushable, Queue},
 };
+use core::marker::PhantomData;
 use std::{io, task::Context};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -10,55 +11,66 @@ pub enum Direction {
     Pop,
 }
 
-pub trait QueueExt
+pub trait QueueExt<T>
 where
-    Self: Sized + Queue<Packet>,
+    Self: Sized + Queue<T>,
+    T: Record,
 {
-    fn pcap<O: io::Write>(self, out: Writer<O>, direction: Direction) -> PcapQueue<Self, O> {
+    fn pcap<O: io::Write>(self, out: Writer<O>, direction: Direction) -> PcapQueue<Self, O, T> {
         PcapQueue::new(self, out, direction)
     }
 
-    fn pcap_push<O: io::Write>(self, out: Writer<O>) -> PcapQueue<Self, O> {
+    fn pcap_push<O: io::Write>(self, out: Writer<O>) -> PcapQueue<Self, O, T> {
         self.pcap(out, Direction::Push)
     }
 
-    fn pcap_pop<O: io::Write>(self, out: Writer<O>) -> PcapQueue<Self, O> {
+    fn pcap_pop<O: io::Write>(self, out: Writer<O>) -> PcapQueue<Self, O, T> {
         self.pcap(out, Direction::Pop)
     }
 }
 
-impl<Q: Queue<Packet>> QueueExt for Q {}
-
-pub struct PcapQueue<Q, O>
+impl<Q, T> QueueExt<T> for Q
 where
-    Q: Queue<Packet>,
+    Q: Queue<T>,
+    T: Record,
+{
+}
+
+pub struct PcapQueue<Q, O, T>
+where
+    Q: Queue<T>,
     O: io::Write,
+    T: Record,
 {
     queue: Q,
     pcap: Writer<O>,
     direction: Direction,
+    value: PhantomData<T>,
 }
 
-impl<Q, O> PcapQueue<Q, O>
+impl<Q, O, T> PcapQueue<Q, O, T>
 where
-    Q: Queue<Packet>,
+    Q: Queue<T>,
     O: io::Write,
+    T: Record,
 {
     pub fn new(queue: Q, out: Writer<O>, direction: Direction) -> Self {
         PcapQueue {
             queue,
             pcap: out,
             direction,
+            value: PhantomData,
         }
     }
 }
 
-impl<Q, O> Queue<Packet> for PcapQueue<Q, O>
+impl<Q, O, T> Queue<T> for PcapQueue<Q, O, T>
 where
-    Q: Queue<Packet>,
+    Q: Queue<T>,
     O: io::Write,
+    T: Record,
 {
-    fn push_lazy(&mut self, value: &mut dyn Pushable<Packet>) -> Result<Option<Packet>, PushError> {
+    fn push_lazy(&mut self, value: &mut dyn Pushable<T>) -> Result<Option<T>, PushError> {
         if self.direction == Direction::Pop {
             return self.queue.push_lazy(value);
         }
@@ -71,9 +83,9 @@ where
 
     fn push_with_notify(
         &mut self,
-        value: &mut dyn Pushable<Packet>,
+        value: &mut dyn Pushable<T>,
         cx: &mut Context,
-    ) -> Result<Option<Packet>, PushError> {
+    ) -> Result<Option<T>, PushError> {
         if self.direction == Direction::Pop {
             return self.queue.push_with_notify(value, cx);
         }
@@ -84,21 +96,21 @@ where
         self.queue.push_with_notify(&mut value, cx)
     }
 
-    fn pop(&mut self) -> Result<Packet, PopError> {
+    fn pop(&mut self) -> Result<T, PopError> {
         let mut packet = self.queue.pop()?;
         if self.direction == Direction::Pop {
-            self.pcap
-                .write_packet(&mut packet)
+            packet
+                .write_pcap_record(&mut self.pcap)
                 .expect("failed to write pcap");
         }
         Ok(packet)
     }
 
-    fn pop_with_notify(&mut self, cx: &mut Context) -> Result<Packet, PopError> {
+    fn pop_with_notify(&mut self, cx: &mut Context) -> Result<T, PopError> {
         let mut packet = self.queue.pop_with_notify(cx)?;
         if self.direction == Direction::Pop {
-            self.pcap
-                .write_packet(&mut packet)
+            packet
+                .write_pcap_record(&mut self.pcap)
                 .expect("failed to write pcap");
         }
         Ok(packet)
@@ -129,20 +141,21 @@ where
     }
 }
 
-struct PushablePacket<'a, O> {
-    inner: &'a mut dyn Pushable<Packet>,
+struct PushablePacket<'a, O, T> {
+    inner: &'a mut dyn Pushable<T>,
     writer: &'a mut Writer<O>,
 }
 
-impl<O> Pushable<Packet> for PushablePacket<'_, O>
+impl<O, T> Pushable<T> for PushablePacket<'_, O, T>
 where
     O: io::Write,
+    T: Record,
 {
-    fn produce(&mut self) -> Packet {
+    fn produce(&mut self) -> T {
         let mut packet = self.inner.produce();
 
-        self.writer
-            .write_packet(&mut packet)
+        packet
+            .write_pcap_record(self.writer)
             .expect("failed to write pcap");
 
         packet

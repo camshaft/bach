@@ -13,6 +13,7 @@ pub use transport::Transport;
 pub struct Packet {
     pub header: Header,
     pub transport: Transport,
+    pub is_duplicate: bool,
 }
 
 impl Packet {

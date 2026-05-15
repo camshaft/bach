@@ -1,6 +1,6 @@
 use crate::environment::net::{
     ip::Packet,
-    pcap::{block, AsPcap},
+    pcap::{block, AsPcap, Record},
 };
 use std::io;
 
@@ -25,9 +25,19 @@ where
         // make sure checksums are updated before emitting
         packet.update_checksum();
 
-        packet.as_pcap_record().as_pcap(self)?;
+        self.write_record(packet)?;
 
         Ok(())
+    }
+
+    pub fn write_record<T: AsPcap>(&mut self, packet: &T) -> io::Result<()> {
+        packet.as_pcap_record().as_pcap(self)
+    }
+}
+
+impl Record for Packet {
+    fn write_pcap_record<W: io::Write>(&mut self, writer: &mut Writer<W>) -> io::Result<()> {
+        writer.write_packet(self)
     }
 }
 

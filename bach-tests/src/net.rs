@@ -162,11 +162,27 @@ fn udp_unidirectional() {
 mod monitors {
     use super::*;
     use crate::sim;
-    use bach::net::monitor;
+    use bach::{environment::default::Runtime, net::monitor};
     use std::{
         io,
-        sync::atomic::{AtomicUsize, Ordering},
+        sync::atomic::{AtomicU64, AtomicUsize, Ordering},
     };
+
+    struct AtomicDuration(AtomicU64);
+
+    impl AtomicDuration {
+        const fn new(value: Duration) -> Self {
+            Self(AtomicU64::new(value.as_nanos() as _))
+        }
+
+        fn store(&self, value: Duration, order: Ordering) {
+            self.0.store(value.as_nanos() as _, order);
+        }
+
+        fn load(&self, order: Ordering) -> Duration {
+            Duration::from_nanos(self.0.load(order))
+        }
+    }
 
     #[test]
     fn packet_sent_counter() {
@@ -245,5 +261,323 @@ mod monitors {
 
             udp_ping_pong();
         });
+    }
+
+    #[test]
+    fn packet_send_delay_is_relative_to_network_base() {
+        let startup = Duration::from_nanos(1);
+
+        crate::testing::init_tracing();
+
+        let mut rt = Runtime::new();
+        rt.run(|| {
+            monitor::on_packet_sent(|_| monitor::delay(5.ms()).into());
+
+            async {
+                let socket = UdpSocket::bind("server:8080").await.unwrap();
+                let mut data = [0; 4];
+                let (len, _) = socket.recv_from(&mut data).await.unwrap();
+                assert_eq!(&data[..len], b"ping");
+            }
+            .group("server")
+            .primary()
+            .spawn();
+
+            async move {
+                bach::time::sleep(startup).await;
+                let socket = UdpSocket::bind("client:0").await.unwrap();
+                socket.send_to(b"ping", "server:8080").await.unwrap();
+            }
+            .group("client")
+            .primary()
+            .spawn();
+        });
+
+        assert_eq!(rt.elapsed(), startup + 55.ms());
+    }
+
+    #[test]
+    fn packet_receive_delay_is_relative_to_network_base() {
+        let startup = Duration::from_nanos(1);
+
+        crate::testing::init_tracing();
+
+        let mut rt = Runtime::new();
+        rt.run(|| {
+            monitor::on_packet(|_, operation| match operation {
+                monitor::Operation::Receive => monitor::delay(5.ms()).into(),
+                monitor::Operation::Send => Default::default(),
+            });
+
+            async {
+                let socket = UdpSocket::bind("server:8080").await.unwrap();
+                let mut data = [0; 4];
+                let (len, _) = socket.recv_from(&mut data).await.unwrap();
+                assert_eq!(&data[..len], b"ping");
+            }
+            .group("server")
+            .primary()
+            .spawn();
+
+            async move {
+                bach::time::sleep(startup).await;
+                let socket = UdpSocket::bind("client:0").await.unwrap();
+                socket.send_to(b"ping", "server:8080").await.unwrap();
+            }
+            .group("client")
+            .primary()
+            .spawn();
+        });
+
+        assert_eq!(rt.elapsed(), startup + 55.ms());
+    }
+
+    #[test]
+    fn packet_duplication_uses_count_and_duplicate_context() {
+        static ORIGINAL_SENDS: AtomicUsize = AtomicUsize::new(0);
+        static DUPLICATE_SENDS: AtomicUsize = AtomicUsize::new(0);
+        static LAST_RECEIVE: AtomicDuration = AtomicDuration::new(Duration::ZERO);
+        let startup = Duration::from_nanos(1);
+
+        crate::testing::init_tracing();
+        ORIGINAL_SENDS.store(0, Ordering::Relaxed);
+        DUPLICATE_SENDS.store(0, Ordering::Relaxed);
+        LAST_RECEIVE.store(Duration::ZERO, Ordering::Relaxed);
+
+        let mut rt = Runtime::new();
+        rt.run(|| {
+            monitor::on_packet(|packet, operation| {
+                if operation == monitor::Operation::Send {
+                    if packet.is_duplicate {
+                        DUPLICATE_SENDS.fetch_add(1, Ordering::Relaxed);
+                        return monitor::delay(5.ms()).into();
+                    } else {
+                        ORIGINAL_SENDS.fetch_add(1, Ordering::Relaxed);
+                        return monitor::duplicate(2).into();
+                    }
+                }
+
+                Default::default()
+            });
+
+            async {
+                let socket = UdpSocket::bind("server:8080").await.unwrap();
+                let mut data = [0; 4];
+                for _ in 0..3 {
+                    let (len, _) = socket.recv_from(&mut data).await.unwrap();
+                    assert_eq!(&data[..len], b"ping");
+                }
+                LAST_RECEIVE.store(
+                    bach::time::Instant::now().elapsed_since_start(),
+                    Ordering::Relaxed,
+                );
+            }
+            .group("server")
+            .primary()
+            .spawn();
+
+            async move {
+                bach::time::sleep(startup).await;
+                let socket = UdpSocket::bind("client:0").await.unwrap();
+                socket.send_to(b"ping", "server:8080").await.unwrap();
+            }
+            .group("client")
+            .primary()
+            .spawn();
+        });
+
+        assert_eq!(ORIGINAL_SENDS.load(Ordering::Relaxed), 1);
+        assert_eq!(DUPLICATE_SENDS.load(Ordering::Relaxed), 2);
+        assert_eq!(LAST_RECEIVE.load(Ordering::Relaxed), startup + 55.ms());
+        assert_eq!(rt.elapsed(), startup + 55.ms());
+    }
+
+    #[test]
+    fn duplicate_delay_is_relative_to_send_time_not_original_delay() {
+        static ORIGINAL_RECEIVE: AtomicDuration = AtomicDuration::new(Duration::ZERO);
+        static DUPLICATE_RECEIVE: AtomicDuration = AtomicDuration::new(Duration::ZERO);
+        let startup = Duration::from_nanos(1);
+
+        crate::testing::init_tracing();
+        ORIGINAL_RECEIVE.store(Duration::ZERO, Ordering::Relaxed);
+        DUPLICATE_RECEIVE.store(Duration::ZERO, Ordering::Relaxed);
+
+        let mut rt = Runtime::new();
+        rt.run(|| {
+            // Original gets 20ms delay, duplicate gets 5ms delay from monitors.
+            // With Absolute offset (default), duplicate delay is independent of original.
+            // Duplicate arrives at: base + 5ms = 55ms
+            // Original arrives at: base + 20ms = 70ms
+            monitor::on_packet(|packet, operation| {
+                if operation == monitor::Operation::Send {
+                    if packet.is_duplicate {
+                        return monitor::delay(5.ms()).into();
+                    }
+                    return monitor::delay(20.ms()).into();
+                }
+                Default::default()
+            });
+            monitor::on_packet(|packet, operation| {
+                if operation == monitor::Operation::Send && !packet.is_duplicate {
+                    return monitor::duplicate(1).absolute().into();
+                }
+                Default::default()
+            });
+
+            async {
+                let socket = UdpSocket::bind("server:8080").await.unwrap();
+                let mut data = [0; 4];
+
+                // Receive both packets and record arrival times
+                let (len, _) = socket.recv_from(&mut data).await.unwrap();
+                assert_eq!(&data[..len], b"ping");
+                let first = bach::time::Instant::now().elapsed_since_start();
+
+                let (len, _) = socket.recv_from(&mut data).await.unwrap();
+                assert_eq!(&data[..len], b"ping");
+                let second = bach::time::Instant::now().elapsed_since_start();
+
+                // Duplicate (5ms + 50ms base) arrives before original (20ms + 50ms base)
+                DUPLICATE_RECEIVE.store(first, Ordering::Relaxed);
+                ORIGINAL_RECEIVE.store(second, Ordering::Relaxed);
+            }
+            .group("server")
+            .primary()
+            .spawn();
+
+            async move {
+                bach::time::sleep(startup).await;
+                let socket = UdpSocket::bind("client:0").await.unwrap();
+                socket.send_to(b"ping", "server:8080").await.unwrap();
+            }
+            .group("client")
+            .primary()
+            .spawn();
+        });
+
+        // base latency = 50ms
+        // Duplicate: send_time + 5ms + 50ms base = startup + 55ms
+        // Original: send_time + 20ms + 50ms base = startup + 70ms
+        assert_eq!(DUPLICATE_RECEIVE.load(Ordering::Relaxed), startup + 55.ms());
+        assert_eq!(ORIGINAL_RECEIVE.load(Ordering::Relaxed), startup + 70.ms());
+    }
+
+    #[test]
+    fn relative_duplicate_delay_stacks_on_original() {
+        static ORIGINAL_RECEIVE: AtomicDuration = AtomicDuration::new(Duration::ZERO);
+        static DUPLICATE_RECEIVE: AtomicDuration = AtomicDuration::new(Duration::ZERO);
+        let startup = Duration::from_nanos(1);
+
+        crate::testing::init_tracing();
+        ORIGINAL_RECEIVE.store(Duration::ZERO, Ordering::Relaxed);
+        DUPLICATE_RECEIVE.store(Duration::ZERO, Ordering::Relaxed);
+
+        let mut rt = Runtime::new();
+        rt.run(|| {
+            // Original gets 20ms delay, duplicate gets 5ms delay from monitors.
+            // With Relative offset, duplicate delay stacks on top of original's.
+            // Duplicate arrives at: base + 20ms (inherited) + 5ms = 75ms
+            // Original arrives at: base + 20ms = 70ms
+            monitor::on_packet(|packet, operation| {
+                if operation == monitor::Operation::Send {
+                    if packet.is_duplicate {
+                        return monitor::delay(5.ms()).into();
+                    }
+                    return monitor::delay(20.ms()).into();
+                }
+                Default::default()
+            });
+            monitor::on_packet(|packet, operation| {
+                if operation == monitor::Operation::Send && !packet.is_duplicate {
+                    return monitor::duplicate(1).into();
+                }
+                Default::default()
+            });
+
+            async {
+                let socket = UdpSocket::bind("server:8080").await.unwrap();
+                let mut data = [0; 4];
+
+                let (len, _) = socket.recv_from(&mut data).await.unwrap();
+                assert_eq!(&data[..len], b"ping");
+                let first = bach::time::Instant::now().elapsed_since_start();
+
+                let (len, _) = socket.recv_from(&mut data).await.unwrap();
+                assert_eq!(&data[..len], b"ping");
+                let second = bach::time::Instant::now().elapsed_since_start();
+
+                // Original (20ms + 50ms base) arrives before duplicate (20ms + 5ms + 50ms base)
+                ORIGINAL_RECEIVE.store(first, Ordering::Relaxed);
+                DUPLICATE_RECEIVE.store(second, Ordering::Relaxed);
+            }
+            .group("server")
+            .primary()
+            .spawn();
+
+            async move {
+                bach::time::sleep(startup).await;
+                let socket = UdpSocket::bind("client:0").await.unwrap();
+                socket.send_to(b"ping", "server:8080").await.unwrap();
+            }
+            .group("client")
+            .primary()
+            .spawn();
+        });
+
+        // base latency = 50ms
+        // Original: send_time + 20ms + 50ms base = startup + 70ms
+        // Duplicate: send_time + 20ms (relative) + 5ms + 50ms base = startup + 75ms
+        assert_eq!(ORIGINAL_RECEIVE.load(Ordering::Relaxed), startup + 70.ms());
+        assert_eq!(DUPLICATE_RECEIVE.load(Ordering::Relaxed), startup + 75.ms());
+    }
+
+    #[test]
+    fn max_duplicates_caps_expansion() {
+        static RECEIVED: AtomicUsize = AtomicUsize::new(0);
+        let startup = Duration::from_nanos(1);
+        // 1 original + DEFAULT_MAX_DUPLICATES (16)
+        let expected = 1 + bach::environment::net::monitor::DEFAULT_MAX_DUPLICATES;
+
+        crate::testing::init_tracing();
+        RECEIVED.store(0, Ordering::Relaxed);
+
+        let mut rt = Runtime::new();
+        rt.run(|| {
+            // Request 100 duplicates — should be capped at the default max (16)
+            monitor::on_packet_sent(|packet| {
+                if !packet.is_duplicate {
+                    return monitor::duplicate(100).into();
+                }
+                Default::default()
+            });
+
+            async move {
+                let socket = UdpSocket::bind("server:8080").await.unwrap();
+                let mut data = [0; 4];
+                for _ in 0..expected {
+                    let (len, _) = socket.recv_from(&mut data).await.unwrap();
+                    assert_eq!(&data[..len], b"ping");
+                    RECEIVED.fetch_add(1, Ordering::Relaxed);
+                }
+                // Verify no additional packets arrive
+                assert!(bach::time::timeout(1.s(), socket.recv_from(&mut data))
+                    .await
+                    .is_err());
+            }
+            .group("server")
+            .primary()
+            .spawn();
+
+            async move {
+                bach::time::sleep(startup).await;
+                let socket = UdpSocket::bind("client:0").await.unwrap();
+                socket.send_to(b"ping", "server:8080").await.unwrap();
+            }
+            .group("client")
+            .primary()
+            .spawn();
+        });
+
+        assert_eq!(RECEIVED.load(Ordering::Relaxed), expected);
     }
 }

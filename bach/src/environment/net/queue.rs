@@ -6,8 +6,11 @@ use crate::{
     },
     ext::*,
     group::Group,
-    net::{monitor::DropReason, SocketAddr},
-    queue::vec_deque,
+    net::{
+        monitor::{DropReason, Offset},
+        SocketAddr,
+    },
+    queue::{latent, vec_deque},
     sync::channel::{Receiver, Sender},
 };
 use alloc::sync::Arc;
@@ -15,6 +18,7 @@ use core::{fmt, time::Duration};
 use sender::SenderId;
 use std::{
     collections::{hash_map::Entry, HashMap},
+    io,
     sync::Mutex,
 };
 
@@ -37,11 +41,11 @@ impl Dispatch {
     }
 
     pub async fn send(&self, packet: Packet) {
-        if self.monitors.on_packet_received(&packet).is_drop() {
+        let Some(outcome) = self.monitors.on_packet_received(&packet) else {
             return;
-        }
+        };
 
-        let mut sender = if let Ok(inner) = self.inner.lock() {
+        let sender = if let Ok(inner) = self.inner.lock() {
             if let Some(senders) = inner.get(&packet.destination()) {
                 senders.lookup(packet.source())
             } else {
@@ -55,10 +59,33 @@ impl Dispatch {
             return;
         };
 
-        if let Ok(Some(prev)) = sender.push_nowait(packet).await {
-            self.monitors
-                .on_packet_dropped(&prev, DropReason::ReceiveBufferFull);
-            count!("packet_dropped", 1);
+        Self::deliver(sender.clone(), packet, outcome.delay, &self.monitors);
+
+        for dup in outcome.duplicates {
+            Self::deliver(sender.clone(), dup.packet, dup.delay, &self.monitors);
+        }
+    }
+
+    fn deliver(mut sender: Sender<Packet>, packet: Packet, delay: Duration, monitors: &Monitors) {
+        if delay.is_zero() {
+            let monitors = monitors.clone();
+            async move {
+                if let Ok(Some(prev)) = sender.push_nowait(packet).await {
+                    monitors.on_packet_dropped(&prev, DropReason::ReceiveBufferFull);
+                    count!("packet_dropped", 1);
+                }
+            }
+            .spawn();
+        } else {
+            let monitors = monitors.clone();
+            async move {
+                crate::time::sleep(delay).await;
+                if let Ok(Some(prev)) = sender.push_nowait(packet).await {
+                    monitors.on_packet_dropped(&prev, DropReason::ReceiveBufferFull);
+                    count!("packet_dropped", 1);
+                }
+            }
+            .spawn();
         }
     }
 
@@ -134,6 +161,34 @@ pub struct Fixed {
     net_latency: Duration,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct InflightPacket {
+    packet: Packet,
+    delay: Duration,
+    delay_offset: Offset,
+}
+
+impl pcap::Record for InflightPacket {
+    fn write_pcap_record<O: std::io::Write>(
+        &mut self,
+        writer: &mut pcap::Writer<O>,
+    ) -> io::Result<()> {
+        writer.write_packet(&mut self.packet)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct NetLatency(Duration);
+
+impl latent::Latency<InflightPacket> for NetLatency {
+    fn for_value(&self, value: &InflightPacket) -> Duration {
+        match value.delay_offset {
+            Offset::Relative => self.0 + value.delay,
+            Offset::Absolute => value.delay,
+        }
+    }
+}
+
 impl Default for Fixed {
     fn default() -> Self {
         Self {
@@ -206,7 +261,7 @@ impl Allocator for Fixed {
             .with_capacity(self.inflight_limit)
             .with_overflow(vec_deque::Overflow::PreferOldest)
             .build()
-            .latent(self.net_latency)
+            .latent(NetLatency(self.net_latency))
             .span(format!("udp://{addr}/net"));
 
         let (mut net_send, mut net_recv) = if let Some(pcap) = pcap {
@@ -218,13 +273,30 @@ impl Allocator for Fixed {
         {
             let monitors = monitors.clone();
             async move {
-                while let Ok(segments) = tx_receiver.recv().await {
+                'packets: while let Ok(segments) = tx_receiver.recv().await {
                     for packet in segments {
-                        if monitors.on_packet_sent(&packet).is_drop() {
+                        let Some(outcome) = monitors.on_packet_sent(&packet) else {
                             continue;
+                        };
+
+                        let inflight = InflightPacket {
+                            packet,
+                            delay: outcome.delay,
+                            delay_offset: outcome.delay_offset,
+                        };
+                        if net_send.push_nowait(inflight).await.is_err() {
+                            break 'packets;
                         }
-                        if net_send.push_nowait(packet).await.is_err() {
-                            break;
+
+                        for dup in outcome.duplicates {
+                            let inflight = InflightPacket {
+                                packet: dup.packet,
+                                delay: dup.delay,
+                                delay_offset: outcome.delay_offset,
+                            };
+                            if net_send.push_nowait(inflight).await.is_err() {
+                                break 'packets;
+                            }
                         }
                     }
                 }
@@ -235,8 +307,8 @@ impl Allocator for Fixed {
 
         let senders = dispatch.clone();
         async move {
-            while let Ok(packet) = net_recv.recv().await {
-                senders.send(packet).await;
+            while let Ok(inflight) = net_recv.recv().await {
+                senders.send(inflight.packet).await;
             }
             let _ = net_recv.close();
         }

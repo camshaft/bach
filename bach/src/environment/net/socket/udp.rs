@@ -286,6 +286,7 @@ impl Pushable<Segments> for SendablePacket<'_> {
         let packet = Packet {
             header: self.header,
             transport: transport.into(),
+            is_duplicate: false,
         };
 
         let segment_len = self.segment_len.unwrap_or(len).min(len);
