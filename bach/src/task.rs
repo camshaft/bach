@@ -51,6 +51,30 @@ pub async fn yield_now() {
     .await
 }
 
+#[cfg(any(test, feature = "coop"))]
+pub(crate) mod non_async {
+    use crate::coop::Operation;
+    use std::any::Any;
+
+    pub struct Yield {
+        operation: Operation,
+    }
+
+    impl Yield {
+        pub fn operation(&self) -> Operation {
+            self.operation
+        }
+    }
+
+    pub fn trigger(operation: Operation) -> ! {
+        std::panic::panic_any(Yield { operation })
+    }
+
+    pub fn from_panic(payload: &(dyn Any + Send)) -> Option<Operation> {
+        payload.downcast_ref::<Yield>().map(Yield::operation)
+    }
+}
+
 pub mod primary {
     use super::*;
     use alloc::sync::Arc;

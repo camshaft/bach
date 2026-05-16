@@ -227,3 +227,40 @@ fn mutex_deadlock_detection() {
         }
     })();
 }
+
+#[test]
+fn mutex_blocking_lock_contention() {
+    bolero::check!().exhaustive().run(sim(|| {
+        let mutex = Arc::new(Mutex::new(0usize));
+
+        {
+            let mutex = mutex.clone();
+            async move {
+                let mut guard = mutex.blocking_lock();
+                *guard += 1;
+                10.ms().sleep().await;
+            }
+            .primary()
+            .spawn_named("holder");
+        }
+
+        {
+            let mutex = mutex.clone();
+            async move {
+                1.ms().sleep().await;
+                let mut guard = mutex.blocking_lock();
+                *guard += 1;
+            }
+            .primary()
+            .spawn_named("contender");
+        }
+
+        async move {
+            20.ms().sleep().await;
+            let guard = mutex.lock().await;
+            assert_eq!(*guard, 2);
+        }
+        .primary()
+        .spawn_named("assert");
+    }));
+}

@@ -58,6 +58,27 @@ mod coop_impl {
             }
         }
 
+        /// Acquires the mutex from synchronous code.
+        ///
+        /// When coop interleaving is active, lock contention yields by unwinding the
+        /// current poll and rescheduling the task.
+        pub fn blocking_lock(&self) -> MutexGuard<'_, T> {
+            loop {
+                match self.inner.try_lock() {
+                    Ok(guard) => return MutexGuard { guard },
+                    Err(_) => {
+                        if self.lock_op.is_active() {
+                            crate::task::non_async::trigger(self.lock_op);
+                        } else {
+                            return MutexGuard {
+                                guard: self.inner.blocking_lock(),
+                            };
+                        }
+                    }
+                }
+            }
+        }
+
         /// Acquires ownership of the mutex, returning an owned guard that can be held across await points.
         ///
         /// This method will register the lock operation with Bach's coop system,
@@ -93,6 +114,30 @@ mod coop_impl {
             match self.inner.clone().try_lock_owned() {
                 Ok(guard) => Ok(OwnedMutexGuard { guard }),
                 Err(err) => Err(err),
+            }
+        }
+
+        /// Acquires ownership of the mutex from synchronous code.
+        ///
+        /// When coop interleaving is active, lock contention yields by unwinding the
+        /// current poll and rescheduling the task.
+        pub fn blocking_lock_owned(self: Arc<Self>) -> OwnedMutexGuard<T>
+        where
+            T: Sized,
+        {
+            loop {
+                match self.inner.clone().try_lock_owned() {
+                    Ok(guard) => return OwnedMutexGuard { guard },
+                    Err(_) => {
+                        if self.lock_op.is_active() {
+                            crate::task::non_async::trigger(self.lock_op);
+                        } else {
+                            return OwnedMutexGuard {
+                                guard: self.inner.clone().blocking_lock_owned(),
+                            };
+                        }
+                    }
+                }
             }
         }
     }
