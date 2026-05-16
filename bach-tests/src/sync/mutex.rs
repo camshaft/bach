@@ -230,13 +230,37 @@ fn mutex_deadlock_detection() {
 
 #[test]
 fn mutex_blocking_lock_contention() {
+    struct BlockingContender {
+        mutex: Arc<Mutex<usize>>,
+        delay: bach::time::Sleep,
+    }
+
+    impl core::future::Future for BlockingContender {
+        type Output = ();
+
+        fn poll(
+            self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Self::Output> {
+            let this = self.get_mut();
+
+            if std::pin::Pin::new(&mut this.delay).poll(cx).is_pending() {
+                return std::task::Poll::Pending;
+            }
+
+            let mut guard = this.mutex.blocking_lock();
+            *guard += 1;
+            std::task::Poll::Ready(())
+        }
+    }
+
     bolero::check!().exhaustive().run(sim(|| {
         let mutex = Arc::new(Mutex::new(0usize));
 
         {
             let mutex = mutex.clone();
             async move {
-                let mut guard = mutex.blocking_lock();
+                let mut guard = mutex.lock().await;
                 *guard += 1;
                 10.ms().sleep().await;
             }
@@ -245,11 +269,9 @@ fn mutex_blocking_lock_contention() {
         }
 
         {
-            let mutex = mutex.clone();
-            async move {
-                1.ms().sleep().await;
-                let mut guard = mutex.blocking_lock();
-                *guard += 1;
+            BlockingContender {
+                mutex: mutex.clone(),
+                delay: 1.ms().sleep(),
             }
             .primary()
             .spawn_named("contender");

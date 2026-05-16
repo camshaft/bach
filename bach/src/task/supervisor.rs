@@ -255,7 +255,9 @@ impl Slot {
                 match catch_unwind(AssertUnwindSafe(|| self.runnable.as_mut().poll(cx))) {
                     Ok(res) => res,
                     Err(payload) => {
-                        if let Some(operation) = crate::task::non_async::from_panic(payload.as_ref()) {
+                        if let Some(operation) =
+                            crate::task::non_async::from_panic(payload.as_ref())
+                        {
                             if operation.poll_acquire(cx).is_ready() {
                                 cx.waker().wake_by_ref();
                             }

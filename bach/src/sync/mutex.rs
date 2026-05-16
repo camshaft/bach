@@ -63,19 +63,12 @@ mod coop_impl {
         /// When coop interleaving is active, lock contention yields by unwinding the
         /// current poll and rescheduling the task.
         pub fn blocking_lock(&self) -> MutexGuard<'_, T> {
-            loop {
-                match self.inner.try_lock() {
-                    Ok(guard) => return MutexGuard { guard },
-                    Err(_) => {
-                        if self.lock_op.is_active() {
-                            crate::task::non_async::trigger(self.lock_op);
-                        } else {
-                            return MutexGuard {
-                                guard: self.inner.blocking_lock(),
-                            };
-                        }
-                    }
-                }
+            match self.inner.try_lock() {
+                Ok(guard) => MutexGuard { guard },
+                Err(_) if self.lock_op.is_active() => crate::task::non_async::trigger(self.lock_op),
+                Err(_) => MutexGuard {
+                    guard: self.inner.blocking_lock(),
+                },
             }
         }
 
@@ -125,19 +118,12 @@ mod coop_impl {
         where
             T: Sized,
         {
-            loop {
-                match self.inner.clone().try_lock_owned() {
-                    Ok(guard) => return OwnedMutexGuard { guard },
-                    Err(_) => {
-                        if self.lock_op.is_active() {
-                            crate::task::non_async::trigger(self.lock_op);
-                        } else {
-                            return OwnedMutexGuard {
-                                guard: self.inner.clone().blocking_lock_owned(),
-                            };
-                        }
-                    }
-                }
+            match self.inner.clone().try_lock_owned() {
+                Ok(guard) => OwnedMutexGuard { guard },
+                Err(_) if self.lock_op.is_active() => crate::task::non_async::trigger(self.lock_op),
+                Err(_) => OwnedMutexGuard {
+                    guard: self.inner.clone().blocking_lock_owned(),
+                },
             }
         }
     }
