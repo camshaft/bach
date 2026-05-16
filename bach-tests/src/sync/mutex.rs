@@ -229,6 +229,35 @@ fn mutex_deadlock_detection() {
 }
 
 #[test]
+fn mutex_blocking_lock_fiber() {
+    // Two fiber tasks race for the same mutex.  Unlike the panic-unwind approach,
+    // the fiber thread genuinely suspends at the `blocking_lock` call site and
+    // resumes there once the coop scheduler grants the operation.
+    static LOG: Log<Event> = Log::new();
+
+    bolero::check!().exhaustive().run(sim(|| {
+        LOG.push(Event::Start);
+
+        let mutex = Arc::new(Mutex::new(0usize));
+
+        for task_id in 0..2 {
+            let mutex = mutex.clone();
+            bach::task::spawn_fiber(move || {
+                let mut guard = mutex.blocking_lock();
+                LOG.push(Event::MutexAcquired { task: task_id });
+                *guard += 1;
+                drop(guard);
+                LOG.push(Event::MutexReleased { task: task_id });
+            })
+            .primary()
+            .spawn_named(format!("fiber-{task_id}"));
+        }
+    }));
+
+    insta::assert_debug_snapshot!(LOG.check());
+}
+
+#[test]
 fn mutex_blocking_lock_contention() {
     struct BlockingContender {
         mutex: Arc<Mutex<usize>>,
