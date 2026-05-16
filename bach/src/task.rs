@@ -15,17 +15,17 @@ pub use join::{JoinError, JoinHandle};
 
 pub fn spawn<F, T>(future: F) -> JoinHandle<T>
 where
-    F: 'static + Future<Output = T> + Send,
-    T: 'static + Send,
+    F: 'static + Future<Output = T>,
+    T: 'static,
 {
     spawn_named(future, "")
 }
 
 pub fn spawn_named<F, N, T>(future: F, name: N) -> JoinHandle<T>
 where
-    F: 'static + Future<Output = T> + Send,
+    F: 'static + Future<Output = T>,
     N: core::fmt::Display,
-    T: 'static + Send,
+    T: 'static,
 {
     scope::borrow_with(|handle| {
         // try to inherit the parent group
@@ -59,17 +59,17 @@ pub mod primary {
 
     pub fn spawn<F, T>(future: F) -> JoinHandle<T>
     where
-        F: 'static + Future<Output = T> + Send,
-        T: 'static + Send,
+        F: 'static + Future<Output = T>,
+        T: 'static,
     {
         super::spawn(create(future))
     }
 
     pub fn spawn_named<F, N, T>(future: F, name: N) -> JoinHandle<T>
     where
-        F: 'static + Future<Output = T> + Send,
+        F: 'static + Future<Output = T>,
         N: core::fmt::Display,
-        T: 'static + Send,
+        T: 'static,
     {
         super::spawn_named(create(future), name)
     }

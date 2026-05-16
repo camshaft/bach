@@ -55,8 +55,7 @@ pub trait SpawnExt {
 
 impl<F> SpawnExt for F
 where
-    F: 'static + Send + core::future::Future,
-    F::Output: Send,
+    F: 'static + core::future::Future,
 {
     type Output = crate::task::JoinHandle<F::Output>;
 

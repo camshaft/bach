@@ -15,8 +15,8 @@ use std::{
 
 pub fn event<F>(events: &Events, future: WithInfo<F>) -> JoinHandle<F::Output>
 where
-    F: 'static + Future + Send,
-    F::Output: 'static + Send,
+    F: 'static + Future,
+    F::Output: 'static,
 {
     let handle = JoinHandle::new(events.clone());
     let future = TaskFuture {
@@ -41,8 +41,8 @@ pin_project! {
 
 impl<F> Runnable for TaskFuture<F>
 where
-    F: 'static + Future + Send,
-    F::Output: 'static + Send,
+    F: 'static + Future,
+    F::Output: 'static,
 {
     fn type_name(&self) -> &'static str {
         std::any::type_name::<F>()
