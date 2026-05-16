@@ -23,7 +23,7 @@ type Q<T> = Arc<Mutex<queue::span::Queue<queue::vec_deque::Queue<T>>>>;
 type Q<T> = Arc<Mutex<queue::vec_deque::Queue<T>>>;
 
 pub type Events = Q<Event>;
-pub type Runs = Q<TaskId>;
+pub type Runs = Arc<Mutex<queue::vec_deque::Queue<TaskId>>>;
 
 pub enum Event {
     Spawn(DynRunnable),

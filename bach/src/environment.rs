@@ -19,7 +19,7 @@ pub trait Environment {
 
     fn close<F>(&mut self, close: F)
     where
-        F: 'static + FnOnce() + Send,
+        F: 'static + FnOnce(),
     {
         self.enter(|_| close());
     }
