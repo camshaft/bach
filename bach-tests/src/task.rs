@@ -1,6 +1,6 @@
 use crate::sim;
 use bach::{ext::*, task::yield_now};
-use std::{future::poll_fn, task::Poll};
+use std::{future::poll_fn, rc::Rc, task::Poll};
 
 #[test]
 fn join() {
@@ -63,6 +63,21 @@ fn abort_after_yield_complete() {
         async move {
             handle.abort();
             handle.await.unwrap_err();
+        }
+        .primary()
+        .spawn();
+    });
+}
+
+#[test]
+fn spawn_non_send_future_and_output() {
+    sim(|| {
+        let value = Rc::new(123);
+        let handle = async move { value }.spawn();
+
+        async move {
+            let value = handle.await.unwrap();
+            assert_eq!(*value, 123);
         }
         .primary()
         .spawn();

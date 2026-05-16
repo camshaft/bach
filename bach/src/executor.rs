@@ -46,8 +46,8 @@ impl<E: Environment> Executor<E> {
 
     pub fn spawn<F, Output>(&self, future: F) -> JoinHandle<Output>
     where
-        F: Future<Output = Output> + Send + 'static,
-        Output: Send + 'static,
+        F: Future<Output = Output> + 'static,
+        Output: 'static,
     {
         self.handle.spawn(future)
     }
@@ -157,8 +157,8 @@ impl<E: Environment> Executor<E> {
 
     pub fn block_on<T, Output>(&mut self, task: T) -> Output
     where
-        T: 'static + Future<Output = Output> + Send,
-        Output: 'static + Send,
+        T: 'static + Future<Output = Output>,
+        Output: 'static,
     {
         let mut task = self.spawn(task);
         let waker = crate::task::waker::noop();
@@ -221,16 +221,16 @@ impl Handle {
 
     pub fn spawn<F, Output>(&self, future: F) -> JoinHandle<Output>
     where
-        F: Future<Output = Output> + Send + 'static,
-        Output: Send + 'static,
+        F: Future<Output = Output> + 'static,
+        Output: 'static,
     {
         self.spawn_named(future, "")
     }
 
     pub fn spawn_named<F, N, Output>(&self, future: F, name: N) -> JoinHandle<Output>
     where
-        F: Future<Output = Output> + Send + 'static,
-        Output: Send + 'static,
+        F: Future<Output = Output> + 'static,
+        Output: 'static,
         N: core::fmt::Display,
     {
         count!("spawn");
