@@ -23,6 +23,7 @@ type Q<T> = Arc<Mutex<queue::span::Queue<queue::vec_deque::Queue<T>>>>;
 type Q<T> = Arc<Mutex<queue::vec_deque::Queue<T>>>;
 
 pub type Events = Q<Event>;
+pub type Runs = Q<TaskId>;
 
 pub enum Event {
     Spawn(DynRunnable),
@@ -40,7 +41,7 @@ impl fmt::Debug for Event {
     }
 }
 
-pub trait Runnable: 'static + Send {
+pub trait Runnable: 'static {
     fn type_name(&self) -> &'static str;
 
     fn set_id(self: Pin<&mut Self>, task_id: TaskId);
@@ -71,10 +72,16 @@ impl Default for Supervisor {
         let events = events.mutex();
 
         let events = Arc::new(events);
+        let runs = queue::vec_deque::Queue::builder()
+            .with_capacity(None)
+            .build()
+            .mutex();
+        let runs = Arc::new(runs);
         let task_counts = Default::default();
         Self(Inner {
             tasks,
             events,
+            runs,
             task_counts,
             max_self_wakes: Some(100_000),
         })
@@ -103,6 +110,7 @@ impl Supervisor {
         Closer(Inner {
             tasks: std::mem::take(&mut self.0.tasks),
             events: self.0.events.clone(),
+            runs: self.0.runs.clone(),
             task_counts: self.0.task_counts.clone(),
             max_self_wakes: self.0.max_self_wakes,
         })
@@ -112,6 +120,7 @@ impl Supervisor {
 struct Inner {
     tasks: Tasks,
     events: Events,
+    runs: Runs,
     task_counts: Arc<AtomicU64>,
     max_self_wakes: Option<usize>,
 }
@@ -129,13 +138,23 @@ impl Inner {
 
     fn microstep(&mut self, current_tick: u64) -> usize {
         let mut count = 0;
-        let Ok(mut guard) = self.events.lock() else {
+        let Ok(mut event_guard) = self.events.lock() else {
+            return count;
+        };
+
+        let Ok(mut run_guard) = self.runs.lock() else {
             return count;
         };
 
         // prevent tasks from injecting themselves over and over again in this microstep
-        let mut events = guard.drain();
-        drop(guard);
+        let mut events = event_guard.drain();
+        let mut runs = run_guard.drain();
+        drop(event_guard);
+        drop(run_guard);
+
+        while let Some(task_id) = runs.pop_front() {
+            events.push_back(Event::Run(task_id));
+        }
 
         while let Some(mut event) = events.pop_front() {
             loop {
@@ -143,7 +162,7 @@ impl Inner {
                     Event::Spawn(mut runnable) => {
                         let task_id = self.tasks.insert_with_key(|task_id| {
                             runnable.as_mut().set_id(task_id);
-                            let run_queue = self.events.clone();
+                            let run_queue = self.runs.clone();
                             let waker_state = Arc::new(waker::ForTask::new(task_id, run_queue));
                             let waker: Waker = waker_state.clone().into();
                             waker.wake_by_ref();

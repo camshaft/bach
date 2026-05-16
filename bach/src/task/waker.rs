@@ -1,4 +1,4 @@
-use super::supervisor::{self, Events, TaskId};
+use super::supervisor::{Runs, TaskId};
 use crate::{sync::queue::Shared as _, task::Info};
 use std::{
     backtrace::Backtrace,
@@ -113,15 +113,15 @@ impl DiagnosticWaker {
 pub struct ForTask {
     idx: TaskId,
     woken: AtomicBool,
-    events: Events,
+    runs: Runs,
 }
 
 impl ForTask {
-    pub fn new(idx: TaskId, events: Events) -> Self {
+    pub fn new(idx: TaskId, runs: Runs) -> Self {
         Self {
             idx,
             woken: AtomicBool::new(false),
-            events,
+            runs,
         }
     }
 
@@ -160,7 +160,7 @@ impl Wake for ForTask {
     fn wake_by_ref(self: &Arc<Self>) {
         let was_woken = self.woken.swap(true, Ordering::Relaxed);
         if !was_woken {
-            let _ = self.events.push(supervisor::Event::Run(self.idx));
+            let _ = self.runs.push(self.idx);
         }
     }
 }

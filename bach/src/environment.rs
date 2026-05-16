@@ -25,6 +25,6 @@ pub trait Environment {
     }
 }
 
-pub trait Runnable: 'static + Send {
+pub trait Runnable: 'static {
     fn run(self) -> Poll<()>;
 }
