@@ -354,16 +354,11 @@ impl Receiver {
 
             let (mut total_len, truncation_len) = packet.transport.copy_payload_into(payload);
 
-            let segment_len = if opts.gro && truncation_len == 0 {
+            let segment_len = if opts.gro && truncation_len == 0 && total_len > 0 {
                 let first_segment_len = total_len;
                 let total_cap: usize = payload.iter().map(|c| c.len()).sum();
 
                 loop {
-                    // Stop if there is not enough space for another full segment
-                    if total_len + first_segment_len > total_cap {
-                        break;
-                    }
-
                     let next_packet = match self.channel.try_pop() {
                         Ok(p) => p,
                         Err(_) => break,
@@ -375,9 +370,16 @@ impl Receiver {
                         break;
                     }
 
-                    // Only coalesce packets of the same segment size
+                    // Only coalesce packets up to the first segment size. An undersized
+                    // segment is allowed only as the terminal coalesced segment.
                     let next_payload_len = next_packet.transport.payload().len();
-                    if next_payload_len != first_segment_len {
+                    if next_payload_len > first_segment_len {
+                        self.pending = Some(next_packet);
+                        break;
+                    }
+
+                    // Stop if there is not enough space for the next segment.
+                    if total_len + next_payload_len > total_cap {
                         self.pending = Some(next_packet);
                         break;
                     }
@@ -392,6 +394,11 @@ impl Receiver {
 
                     let copied = copy_into_at(next_packet.transport.payload(), payload, total_len);
                     total_len += copied;
+
+                    // Stop after coalescing an undersized terminal segment.
+                    if next_payload_len < first_segment_len {
+                        break;
+                    }
                 }
 
                 first_segment_len
