@@ -441,6 +441,14 @@ impl<T> Receiver<T> {
         Arc::ptr_eq(&self.channel, &other.channel)
     }
 
+    /// Attempts to pop a message without blocking.
+    ///
+    /// Returns `Ok(T)` if a message was immediately available, or
+    /// `Err(PopError::Empty)` / `Err(PopError::Closed)` otherwise.
+    pub fn try_pop(&self) -> Result<T, PopError> {
+        self.pop_unchecked()
+    }
+
     #[inline]
     fn pop_unchecked(&self) -> Result<T, PopError> {
         let mut ctx = core::task::Context::from_waker(&self.waker);

@@ -300,11 +300,15 @@ impl Pushable<Segments> for SendablePacket<'_> {
 
 struct Receiver {
     channel: channel::Receiver<Packet>,
+    pending: Option<Packet>,
 }
 
 impl Receiver {
     fn new(channel: channel::Receiver<Packet>) -> Self {
-        Self { channel }
+        Self {
+            channel,
+            pending: None,
+        }
     }
 
     fn recvmsg(
@@ -323,7 +327,9 @@ impl Receiver {
         }
 
         loop {
-            let packet = if let Some(cx) = cx.as_mut() {
+            let packet = if let Some(pending) = self.pending.take() {
+                pending
+            } else if let Some(cx) = cx.as_mut() {
                 let res = self.channel.poll_pop(cx)?;
                 let Poll::Ready(v) = res else {
                     return Err(io::ErrorKind::WouldBlock.into());
@@ -346,15 +352,51 @@ impl Receiver {
                 }
             }
 
-            let (copied_len, truncation_len) = packet.transport.copy_payload_into(payload);
+            let (mut total_len, truncation_len) = packet.transport.copy_payload_into(payload);
+
+            let segment_len = if opts.gro && truncation_len == 0 {
+                let first_segment_len = total_len;
+                let total_cap: usize = payload.iter().map(|c| c.len()).sum();
+
+                loop {
+                    // Stop if there is not enough space for another full segment
+                    if total_len + first_segment_len > total_cap {
+                        break;
+                    }
+
+                    let next_packet = match self.channel.try_pop() {
+                        Ok(p) => p,
+                        Err(_) => break,
+                    };
+
+                    // Only coalesce packets from the same source
+                    if next_packet.source() != source {
+                        self.pending = Some(next_packet);
+                        break;
+                    }
+
+                    // Only coalesce packets of the same segment size
+                    let next_payload_len = next_packet.transport.payload().len();
+                    if next_payload_len != first_segment_len {
+                        self.pending = Some(next_packet);
+                        break;
+                    }
+
+                    let copied = copy_into_at(next_packet.transport.payload(), payload, total_len);
+                    total_len += copied;
+                }
+
+                first_segment_len
+            } else {
+                total_len
+            };
 
             let mut res = RecvResult {
                 peer_addr: source,
                 local_addr: destination,
                 ecn: packet.header.ecn(),
-                len: copied_len,
-                // TODO gro
-                segment_len: copied_len,
+                len: total_len,
+                segment_len,
                 truncation_len,
             };
 
@@ -366,4 +408,33 @@ impl Receiver {
             return Ok(res);
         }
     }
+}
+
+/// Copies `src` bytes into `chunks` starting at `byte_offset` within the flat buffer view.
+/// Returns the number of bytes copied.
+fn copy_into_at(src: &[u8], chunks: &mut [io::IoSliceMut], byte_offset: usize) -> usize {
+    let mut src = src;
+    let mut offset = byte_offset;
+    let mut total_copied = 0;
+
+    for chunk in chunks.iter_mut() {
+        if offset >= chunk.len() {
+            offset -= chunk.len();
+            continue;
+        }
+
+        let dest = &mut chunk[offset..];
+        offset = 0;
+
+        let n = dest.len().min(src.len());
+        dest[..n].copy_from_slice(&src[..n]);
+        src = &src[n..];
+        total_copied += n;
+
+        if src.is_empty() {
+            break;
+        }
+    }
+
+    total_copied
 }

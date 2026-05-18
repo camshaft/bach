@@ -129,6 +129,49 @@ fn gso() {
 }
 
 #[test]
+fn gro() {
+    static BUFFER: &[u8] = b"0123456789";
+    const SEGMENT_LEN: usize = 2;
+
+    sim(|| {
+        async move {
+            let socket = UdpSocket::bind("client:9090").await.unwrap();
+
+            // Wait past network latency so all segments are in the receive buffer
+            bach::time::sleep(Duration::from_millis(100)).await;
+
+            let mut data = [0u8; 10];
+            let mut opts = bach::net::socket::RecvOptions::default();
+            opts.gro = true;
+            let res = socket
+                .recv_msg(&mut [std::io::IoSliceMut::new(&mut data)], opts)
+                .await
+                .unwrap();
+
+            assert_eq!(res.segment_len, SEGMENT_LEN, "segment_len mismatch");
+            assert_eq!(res.len, BUFFER.len(), "total received length mismatch");
+            assert_eq!(&data[..res.len], BUFFER, "payload mismatch");
+        }
+        .group("client")
+        .primary()
+        .spawn();
+
+        async move {
+            let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
+            let mut opts = SendOptions::default();
+            opts.segment_len = Some(SEGMENT_LEN);
+            socket
+                .send_msg("client:9090", &[IoSlice::new(BUFFER)], opts)
+                .await
+                .unwrap();
+        }
+        .group("server")
+        .spawn();
+    });
+}
+
+
+#[test]
 fn udp_unidirectional() {
     let items: u64 = if cfg!(feature = "leaks") { 500 } else { 10_000 };
     sim(|| {
