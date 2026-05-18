@@ -167,6 +167,14 @@ impl UdpSocket {
         Ok(res.peer_addr).into()
     }
 
+    pub async fn recv_msg(
+        &self,
+        buf: &mut [IoSliceMut<'_>],
+        opts: socket::RecvOptions,
+    ) -> Result<socket::RecvResult> {
+        poll_fn(|cx| self.poll_recv_msg(cx, buf, opts)).await
+    }
+
     pub fn poll_recv_msg(
         &self,
         cx: &mut Context,

@@ -441,6 +441,18 @@ impl<T> Receiver<T> {
         Arc::ptr_eq(&self.channel, &other.channel)
     }
 
+    /// Attempts to pop a message without blocking.
+    ///
+    /// Returns `Ok(T)` if a message was immediately available, or
+    /// `Err(PopError::Empty)` / `Err(PopError::Closed)` otherwise.
+    ///
+    /// Note: this bypasses coop resource acquisition and should only be used
+    /// for secondary non-blocking peeks (e.g. GRO coalescing) after a primary
+    /// blocking pop has already been performed.
+    pub(crate) fn try_pop(&self) -> Result<T, PopError> {
+        self.pop_unchecked()
+    }
+
     #[inline]
     fn pop_unchecked(&self) -> Result<T, PopError> {
         let mut ctx = core::task::Context::from_waker(&self.waker);

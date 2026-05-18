@@ -129,6 +129,261 @@ fn gso() {
 }
 
 #[test]
+fn gro() {
+    const BUFFER: &[u8] = b"0123456789";
+    const SEGMENT_LEN: usize = 2;
+
+    sim(|| {
+        async move {
+            let socket = UdpSocket::bind("client:9090").await.unwrap();
+
+            // Wait past network latency so all segments are in the receive buffer
+            bach::time::sleep(Duration::from_millis(100)).await;
+
+            // Split the receive buffer into two slices so that coalesced segments
+            // cross the slice boundary (e.g. segment "45" spans data1[4] and data2[0]).
+            let mut data1 = [0u8; BUFFER.len() / 2];
+            let mut data2 = [0u8; BUFFER.len() / 2];
+            let mut opts = bach::net::socket::RecvOptions::default();
+            opts.gro = true;
+            let res = socket
+                .recv_msg(
+                    &mut [
+                        std::io::IoSliceMut::new(&mut data1),
+                        std::io::IoSliceMut::new(&mut data2),
+                    ],
+                    opts,
+                )
+                .await
+                .unwrap();
+
+            assert_eq!(res.segment_len, SEGMENT_LEN, "segment_len mismatch");
+            assert_eq!(res.len, BUFFER.len(), "total received length mismatch");
+            let combined: Vec<u8> = data1.iter().chain(data2.iter()).copied().collect();
+            assert_eq!(&combined[..res.len], BUFFER, "payload mismatch");
+        }
+        .group("client")
+        .primary()
+        .spawn();
+
+        async move {
+            let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
+            let mut opts = SendOptions::default();
+            opts.segment_len = Some(SEGMENT_LEN);
+            socket
+                .send_msg("client:9090", &[IoSlice::new(BUFFER)], opts)
+                .await
+                .unwrap();
+        }
+        .group("server")
+        .spawn();
+    });
+}
+
+#[test]
+fn gro_undersized_tail() {
+    // 10 bytes split into 3-byte segments yields "012", "345", "678", "9".
+    // GRO should coalesce the final undersized segment as the last segment.
+    const SEGMENT_LEN: usize = 3;
+    const EXPECTED: &[u8] = b"0123456789";
+
+    sim(|| {
+        async move {
+            let socket = UdpSocket::bind("client:9090").await.unwrap();
+
+            // Wait past network latency so all packets are in the receive buffer
+            bach::time::sleep(Duration::from_millis(100)).await;
+
+            let mut data = [0u8; EXPECTED.len()];
+            let mut opts = bach::net::socket::RecvOptions::default();
+            opts.gro = true;
+            let res = socket
+                .recv_msg(&mut [std::io::IoSliceMut::new(&mut data)], opts)
+                .await
+                .unwrap();
+
+            // The undersized tail is coalesced as the final segment.
+            assert_eq!(res.segment_len, SEGMENT_LEN, "segment_len mismatch");
+            assert_eq!(res.len, EXPECTED.len(), "coalesced length mismatch");
+            assert_eq!(&data[..res.len], EXPECTED, "coalesced payload mismatch");
+        }
+        .group("client")
+        .primary()
+        .spawn();
+
+        async move {
+            let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
+            let mut opts = SendOptions::default();
+            opts.segment_len = Some(SEGMENT_LEN);
+            socket
+                .send_msg("client:9090", &[IoSlice::new(EXPECTED)], opts)
+                .await
+                .unwrap();
+        }
+        .group("server")
+        .spawn();
+    });
+}
+
+#[test]
+fn gro_source_mismatch_pending() {
+    const SEGMENT_LEN: usize = 2;
+    const FIRST_SOURCE: &[u8] = b"abcd";
+    const SECOND_SOURCE: &[u8] = b"XY";
+
+    sim(|| {
+        async move {
+            let socket = UdpSocket::bind("client:9090").await.unwrap();
+            bach::time::sleep(Duration::from_millis(100)).await;
+
+            let mut data = [0u8; 8];
+            let mut opts = bach::net::socket::RecvOptions::default();
+            opts.gro = true;
+            let res = socket
+                .recv_msg(&mut [std::io::IoSliceMut::new(&mut data)], opts)
+                .await
+                .unwrap();
+
+            assert_eq!(res.segment_len, SEGMENT_LEN, "segment_len mismatch");
+            assert_eq!(res.len, FIRST_SOURCE.len(), "coalesced length mismatch");
+            assert_eq!(&data[..res.len], FIRST_SOURCE, "coalesced payload mismatch");
+
+            let (len, _) = socket.recv_from(&mut data).await.unwrap();
+            assert_eq!(len, SECOND_SOURCE.len(), "pending length mismatch");
+            assert_eq!(&data[..len], SECOND_SOURCE, "pending payload mismatch");
+        }
+        .group("client")
+        .primary()
+        .spawn();
+
+        async move {
+            let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
+            let mut opts = SendOptions::default();
+            opts.segment_len = Some(SEGMENT_LEN);
+            socket
+                .send_msg("client:9090", &[IoSlice::new(FIRST_SOURCE)], opts)
+                .await
+                .unwrap();
+        }
+        .group("server_a")
+        .spawn();
+
+        async move {
+            let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
+            bach::time::sleep(Duration::from_millis(1)).await;
+            socket.send_to(SECOND_SOURCE, "client:9090").await.unwrap();
+        }
+        .group("server_b")
+        .spawn();
+    });
+}
+
+#[test]
+fn gro_ecn_mismatch_pending() {
+    const FIRST: &[u8] = b"ab";
+    const SECOND: &[u8] = b"cd";
+    const FIRST_ECN: u8 = 1;
+    const SECOND_ECN: u8 = 2;
+
+    sim(|| {
+        async move {
+            let socket = UdpSocket::bind("client:9090").await.unwrap();
+            bach::time::sleep(Duration::from_millis(100)).await;
+
+            let mut data = [0u8; 8];
+            let mut gro_opts = bach::net::socket::RecvOptions::default();
+            gro_opts.gro = true;
+            let first = socket
+                .recv_msg(&mut [std::io::IoSliceMut::new(&mut data)], gro_opts)
+                .await
+                .unwrap();
+            assert_eq!(first.len, FIRST.len(), "first length mismatch");
+            assert_eq!(first.segment_len, FIRST.len(), "first segment length mismatch");
+            assert_eq!(first.ecn, FIRST_ECN, "first ecn mismatch");
+            assert_eq!(&data[..first.len], FIRST, "first payload mismatch");
+
+            let second = socket
+                .recv_msg(
+                    &mut [std::io::IoSliceMut::new(&mut data)],
+                    bach::net::socket::RecvOptions::default(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(second.len, SECOND.len(), "second length mismatch");
+            assert_eq!(second.ecn, SECOND_ECN, "second ecn mismatch");
+            assert_eq!(&data[..second.len], SECOND, "second payload mismatch");
+        }
+        .group("client")
+        .primary()
+        .spawn();
+
+        async move {
+            let socket = UdpSocket::bind("server:0").await.unwrap();
+            let mut first_opts = SendOptions::default();
+            first_opts.ecn = FIRST_ECN;
+            socket
+                .send_msg("client:9090", &[IoSlice::new(FIRST)], first_opts)
+                .await
+                .unwrap();
+
+            let mut second_opts = SendOptions::default();
+            second_opts.ecn = SECOND_ECN;
+            socket
+                .send_msg("client:9090", &[IoSlice::new(SECOND)], second_opts)
+                .await
+                .unwrap();
+        }
+        .group("server")
+        .spawn();
+    });
+}
+
+#[test]
+fn gro_zero_len_not_coalesced() {
+    const MARKER: &[u8] = b"x";
+
+    sim(|| {
+        async move {
+            let socket = UdpSocket::bind("client:9090").await.unwrap();
+            bach::time::sleep(Duration::from_millis(100)).await;
+
+            let mut data = [0u8; 1];
+            let mut opts = bach::net::socket::RecvOptions::default();
+            opts.gro = true;
+            let first = socket
+                .recv_msg(&mut [std::io::IoSliceMut::new(&mut data)], opts)
+                .await
+                .unwrap();
+            let second = socket
+                .recv_msg(&mut [std::io::IoSliceMut::new(&mut data)], opts)
+                .await
+                .unwrap();
+
+            assert_eq!(first.len, 0, "first zero-length datagram mismatch");
+            assert_eq!(first.segment_len, 0, "first segment_len mismatch");
+            assert_eq!(second.len, 0, "second zero-length datagram mismatch");
+            assert_eq!(second.segment_len, 0, "second segment_len mismatch");
+
+            let (marker_len, _) = socket.recv_from(&mut data).await.unwrap();
+            assert_eq!(marker_len, MARKER.len(), "marker length mismatch");
+            assert_eq!(&data[..marker_len], MARKER, "marker payload mismatch");
+        }
+        .group("client")
+        .primary()
+        .spawn();
+
+        async move {
+            let socket = UdpSocket::bind("server:0").await.unwrap();
+            socket.send_to(&[], "client:9090").await.unwrap();
+            socket.send_to(&[], "client:9090").await.unwrap();
+            socket.send_to(MARKER, "client:9090").await.unwrap();
+        }
+        .group("server")
+        .spawn();
+    });
+}
+
+#[test]
 fn udp_unidirectional() {
     let items: u64 = if cfg!(feature = "leaks") { 500 } else { 10_000 };
     sim(|| {
