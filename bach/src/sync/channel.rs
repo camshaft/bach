@@ -445,7 +445,11 @@ impl<T> Receiver<T> {
     ///
     /// Returns `Ok(T)` if a message was immediately available, or
     /// `Err(PopError::Empty)` / `Err(PopError::Closed)` otherwise.
-    pub fn try_pop(&self) -> Result<T, PopError> {
+    ///
+    /// Note: this bypasses coop resource acquisition and should only be used
+    /// for secondary non-blocking peeks (e.g. GRO coalescing) after a primary
+    /// blocking pop has already been performed.
+    pub(crate) fn try_pop(&self) -> Result<T, PopError> {
         self.pop_unchecked()
     }
 

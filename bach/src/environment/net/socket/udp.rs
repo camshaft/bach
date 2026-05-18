@@ -382,6 +382,14 @@ impl Receiver {
                         break;
                     }
 
+                    // Only coalesce packets with matching ECN — the coalesced result
+                    // can only report one ECN value (the first packet's), so mismatched
+                    // ECN marks must not be merged.
+                    if next_packet.header.ecn() != packet.header.ecn() {
+                        self.pending = Some(next_packet);
+                        break;
+                    }
+
                     let copied = copy_into_at(next_packet.transport.payload(), payload, total_len);
                     total_len += copied;
                 }

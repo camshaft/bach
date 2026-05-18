@@ -130,7 +130,7 @@ fn gso() {
 
 #[test]
 fn gro() {
-    static BUFFER: &[u8] = b"0123456789";
+    const BUFFER: &[u8] = b"0123456789";
     const SEGMENT_LEN: usize = 2;
 
     sim(|| {
@@ -140,17 +140,27 @@ fn gro() {
             // Wait past network latency so all segments are in the receive buffer
             bach::time::sleep(Duration::from_millis(100)).await;
 
-            let mut data = [0u8; 10];
+            // Split the receive buffer into two slices so that coalesced segments
+            // cross the slice boundary (e.g. segment "45" spans data1[4] and data2[0]).
+            let mut data1 = [0u8; BUFFER.len() / 2];
+            let mut data2 = [0u8; BUFFER.len() / 2];
             let mut opts = bach::net::socket::RecvOptions::default();
             opts.gro = true;
             let res = socket
-                .recv_msg(&mut [std::io::IoSliceMut::new(&mut data)], opts)
+                .recv_msg(
+                    &mut [
+                        std::io::IoSliceMut::new(&mut data1),
+                        std::io::IoSliceMut::new(&mut data2),
+                    ],
+                    opts,
+                )
                 .await
                 .unwrap();
 
             assert_eq!(res.segment_len, SEGMENT_LEN, "segment_len mismatch");
             assert_eq!(res.len, BUFFER.len(), "total received length mismatch");
-            assert_eq!(&data[..res.len], BUFFER, "payload mismatch");
+            let combined: Vec<u8> = data1.iter().chain(data2.iter()).copied().collect();
+            assert_eq!(&combined[..res.len], BUFFER, "payload mismatch");
         }
         .group("client")
         .primary()
@@ -170,6 +180,60 @@ fn gro() {
     });
 }
 
+#[test]
+fn gro_undersized_tail() {
+    // 9 bytes split into 3-byte segments: "012", "345", "678" — followed by a
+    // 1-byte tail "9" that is smaller than the segment size.  GRO must coalesce
+    // the three uniform segments and leave the undersized tail for the next recv.
+    const SEGMENT_LEN: usize = 3;
+    const FULL: &[u8] = b"012345678";
+    const TAIL: &[u8] = b"9";
+
+    sim(|| {
+        async move {
+            let socket = UdpSocket::bind("client:9090").await.unwrap();
+
+            // Wait past network latency so all packets are in the receive buffer
+            bach::time::sleep(Duration::from_millis(100)).await;
+
+            let mut data = [0u8; 16];
+            let mut opts = bach::net::socket::RecvOptions::default();
+            opts.gro = true;
+            let res = socket
+                .recv_msg(&mut [std::io::IoSliceMut::new(&mut data)], opts)
+                .await
+                .unwrap();
+
+            // The three full segments are coalesced; the undersized tail is held back
+            assert_eq!(res.segment_len, SEGMENT_LEN, "segment_len mismatch");
+            assert_eq!(res.len, FULL.len(), "coalesced length mismatch");
+            assert_eq!(&data[..res.len], FULL, "coalesced payload mismatch");
+
+            // The pending undersized tail is returned by the next recv
+            let (len, _) = socket.recv_from(&mut data).await.unwrap();
+            assert_eq!(len, TAIL.len(), "tail length mismatch");
+            assert_eq!(&data[..len], TAIL, "tail payload mismatch");
+        }
+        .group("client")
+        .primary()
+        .spawn();
+
+        async move {
+            let socket = UdpSocket::bind("0.0.0.0:0").await.unwrap();
+            // Send the full segments via GSO
+            let mut opts = SendOptions::default();
+            opts.segment_len = Some(SEGMENT_LEN);
+            socket
+                .send_msg("client:9090", &[IoSlice::new(FULL)], opts)
+                .await
+                .unwrap();
+            // Then send the undersized tail as a separate smaller packet
+            socket.send_to(TAIL, "client:9090").await.unwrap();
+        }
+        .group("server")
+        .spawn();
+    });
+}
 
 #[test]
 fn udp_unidirectional() {
