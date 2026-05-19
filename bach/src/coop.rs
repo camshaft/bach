@@ -155,4 +155,8 @@ impl Operation {
         scope::try_borrow_mut_with(|coop| coop.as_mut().map(|coop| coop.poll_acquire(cx, *self)))
             .unwrap_or(Poll::Ready(()))
     }
+
+    pub(crate) fn is_active(&self) -> bool {
+        self.0 != u64::MAX
+    }
 }

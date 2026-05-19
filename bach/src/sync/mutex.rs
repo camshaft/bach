@@ -58,6 +58,49 @@ mod coop_impl {
             }
         }
 
+        /// Acquires the mutex from synchronous code.
+        ///
+        /// When called from a fiber spawned with [`task::spawn_fiber`] and the
+        /// coop scheduler is active, the fiber thread parks at this call site on
+        /// every acquisition attempt so the scheduler can explore all possible
+        /// orderings between concurrent fibers and async tasks — mirroring what
+        /// the async [`lock`](Self::lock) method does via `await`.
+        ///
+        /// Outside a fiber but with coop active, contention falls back to the
+        /// panic/unwind yield mechanism (suitable for manual `Future::poll`
+        /// implementations that restart cleanly from the top of `poll`).
+        pub fn blocking_lock(&self) -> MutexGuard<'_, T> {
+            // Fiber + coop path: always go through the coop scheduling point
+            // before trying to acquire so the scheduler can explore all orderings.
+            let fiber = crate::task::fiber::CURRENT_FIBER.with(|f| f.borrow().clone());
+            if let Some(ref fiber) = fiber {
+                if self.lock_op.is_active() {
+                    loop {
+                        fiber.park_for_operation(self.lock_op);
+                        if let Ok(guard) = self.inner.try_lock() {
+                            return MutexGuard { guard };
+                        }
+                        // Mutex still held (another task ran between the coop grant
+                        // and this attempt); re-register and try again.
+                    }
+                }
+            }
+
+            // Non-fiber fast path.
+            if let Ok(guard) = self.inner.try_lock() {
+                return MutexGuard { guard };
+            }
+
+            // Fallback: panic-unwind yield for manual Future::poll impls.
+            if self.lock_op.is_active() {
+                crate::task::non_async::trigger(self.lock_op);
+            }
+
+            MutexGuard {
+                guard: self.inner.blocking_lock(),
+            }
+        }
+
         /// Acquires ownership of the mutex, returning an owned guard that can be held across await points.
         ///
         /// This method will register the lock operation with Bach's coop system,
@@ -93,6 +136,48 @@ mod coop_impl {
             match self.inner.clone().try_lock_owned() {
                 Ok(guard) => Ok(OwnedMutexGuard { guard }),
                 Err(err) => Err(err),
+            }
+        }
+
+        /// Acquires ownership of the mutex from synchronous code.
+        ///
+        /// When called from a fiber spawned with [`task::spawn_fiber`] and the
+        /// coop scheduler is active, the fiber thread parks at this call site on
+        /// every acquisition attempt so the scheduler can explore all possible
+        /// orderings, mirroring the async [`lock_owned`](Self::lock_owned) method.
+        ///
+        /// Outside a fiber but with coop active, contention falls back to the
+        /// panic/unwind yield mechanism (suitable for manual `Future::poll`
+        /// implementations that restart cleanly from the top of `poll`).
+        pub fn blocking_lock_owned(self: Arc<Self>) -> OwnedMutexGuard<T>
+        where
+            T: Sized,
+        {
+            // Fiber + coop path.
+            let fiber = crate::task::fiber::CURRENT_FIBER.with(|f| f.borrow().clone());
+            if let Some(ref fiber) = fiber {
+                if self.lock_op.is_active() {
+                    loop {
+                        fiber.park_for_operation(self.lock_op);
+                        if let Ok(guard) = self.inner.clone().try_lock_owned() {
+                            return OwnedMutexGuard { guard };
+                        }
+                    }
+                }
+            }
+
+            // Non-fiber fast path.
+            if let Ok(guard) = self.inner.clone().try_lock_owned() {
+                return OwnedMutexGuard { guard };
+            }
+
+            // Fallback: panic-unwind yield for manual Future::poll impls.
+            if self.lock_op.is_active() {
+                crate::task::non_async::trigger(self.lock_op);
+            }
+
+            OwnedMutexGuard {
+                guard: self.inner.clone().blocking_lock_owned(),
             }
         }
     }
