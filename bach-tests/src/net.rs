@@ -457,6 +457,42 @@ mod monitors {
     }
 
     #[test]
+    fn monitor_can_try_lookup_group_ip_synchronously() {
+        static MATCHED: AtomicUsize = AtomicUsize::new(0);
+        MATCHED.store(0, Ordering::Relaxed);
+
+        sim(|| {
+            monitor::on_packet_sent(|packet| {
+                if packet.destination() == bach::net::try_lookup("server:8080").unwrap() {
+                    MATCHED.fetch_add(1, Ordering::Relaxed);
+                }
+                Default::default()
+            });
+
+            async {
+                let socket = UdpSocket::bind("server:8080").await.unwrap();
+                let mut data = [0; 4];
+                let (len, _) = socket.recv_from(&mut data).await.unwrap();
+                assert_eq!(&data[..len], b"ping");
+            }
+            .group("server")
+            .primary()
+            .spawn();
+
+            async {
+                bach::time::sleep(1.ms()).await;
+                let socket = UdpSocket::bind("client:0").await.unwrap();
+                socket.send_to(b"ping", "server:8080").await.unwrap();
+            }
+            .group("client")
+            .primary()
+            .spawn();
+        });
+
+        assert_eq!(MATCHED.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
     fn socket_read_write_counter() {
         static W_COUNT: AtomicUsize = AtomicUsize::new(0);
         static R_COUNT: AtomicUsize = AtomicUsize::new(0);

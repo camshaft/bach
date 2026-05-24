@@ -14,6 +14,13 @@ pub use addr::ToSocketAddrs;
 pub use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, SocketAddrV4, SocketAddrV6};
 pub use udp::UdpSocket;
 
+pub fn try_lookup<T>(host: T) -> io::Result<SocketAddr>
+where
+    T: ToSocketAddrs,
+{
+    addr::lookup_host(host)
+}
+
 pub async fn lookup_host<T>(host: T) -> io::Result<impl Iterator<Item = SocketAddr>>
 where
     T: ToSocketAddrs,
