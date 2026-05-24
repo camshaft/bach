@@ -8,10 +8,6 @@ pub(crate) fn lookup_host<Addr: ToSocketAddrs>(v: Addr) -> io::Result<SocketAddr
     v.to_socket_addr(sealed::internal())
 }
 
-pub(crate) fn lookup_ip<Addr: ToIpAddr>(v: Addr) -> io::Result<IpAddr> {
-    v.to_ip_addr(sealed::internal())
-}
-
 pub trait ToIpAddr: sealed::Sealed {
     #[doc(hidden)]
     fn to_ip_addr(&self, internal: sealed::Internal) -> io::Result<IpAddr>;

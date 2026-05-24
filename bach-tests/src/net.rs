@@ -463,7 +463,7 @@ mod monitors {
 
         sim(|| {
             monitor::on_packet_sent(|packet| {
-                if packet.destination_ip() == bach::net::try_lookup("server").unwrap() {
+                if packet.destination() == bach::net::try_lookup("server:8080").unwrap() {
                     MATCHED.fetch_add(1, Ordering::Relaxed);
                 }
                 Default::default()

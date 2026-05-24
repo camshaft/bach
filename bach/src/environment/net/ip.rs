@@ -17,22 +17,14 @@ pub struct Packet {
 }
 
 impl Packet {
-    pub fn source_ip(&self) -> IpAddr {
-        self.header.source()
-    }
-
-    pub fn destination_ip(&self) -> IpAddr {
-        self.header.destination()
-    }
-
     pub fn source(&self) -> SocketAddr {
-        let ip = self.source_ip();
+        let ip = self.header.source();
         let port = self.transport.source();
         SocketAddr::new(ip, port)
     }
 
     pub fn destination(&self) -> SocketAddr {
-        let ip = self.destination_ip();
+        let ip = self.header.destination();
         let port = self.transport.destination();
         SocketAddr::new(ip, port)
     }

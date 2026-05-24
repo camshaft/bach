@@ -10,15 +10,15 @@ pub mod monitor;
 #[allow(dead_code)]
 pub(crate) mod monitor;
 
-pub use addr::{ToIpAddr, ToSocketAddrs};
+pub use addr::ToSocketAddrs;
 pub use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, SocketAddrV4, SocketAddrV6};
 pub use udp::UdpSocket;
 
-pub fn try_lookup<T>(host: T) -> io::Result<IpAddr>
+pub fn try_lookup<T>(host: T) -> io::Result<SocketAddr>
 where
-    T: ToIpAddr,
+    T: ToSocketAddrs,
 {
-    addr::lookup_ip(host)
+    addr::lookup_host(host)
 }
 
 pub async fn lookup_host<T>(host: T) -> io::Result<impl Iterator<Item = SocketAddr>>
