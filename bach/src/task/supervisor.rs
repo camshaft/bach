@@ -247,7 +247,32 @@ impl Slot {
         self.waker_state.before_poll();
 
         let cx = &mut Context::from_waker(&self.waker);
-        let res = self.runnable.as_mut().poll(cx);
+        let res = {
+            #[cfg(any(test, feature = "coop"))]
+            {
+                use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
+
+                match catch_unwind(AssertUnwindSafe(|| self.runnable.as_mut().poll(cx))) {
+                    Ok(res) => res,
+                    Err(payload) => {
+                        if let Some(operation) =
+                            crate::task::non_async::from_panic(payload.as_ref())
+                        {
+                            if operation.poll_acquire(cx).is_ready() {
+                                cx.waker().wake_by_ref();
+                            }
+                            Poll::Pending
+                        } else {
+                            resume_unwind(payload);
+                        }
+                    }
+                }
+            }
+            #[cfg(not(any(test, feature = "coop")))]
+            {
+                self.runnable.as_mut().poll(cx)
+            }
+        };
 
         // check that the task contract is enforced
         if cfg!(debug_assertions) && res.is_pending() {

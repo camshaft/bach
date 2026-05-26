@@ -11,6 +11,11 @@ pub(crate) mod spawn;
 pub(crate) mod supervisor;
 pub(crate) mod waker;
 
+#[cfg(any(test, feature = "coop"))]
+pub mod fiber;
+#[cfg(any(test, feature = "coop"))]
+pub use fiber::spawn_fiber;
+
 pub use join::{JoinError, JoinHandle};
 
 pub fn spawn<F, T>(future: F) -> JoinHandle<T>
@@ -49,6 +54,30 @@ pub async fn yield_now() {
         Poll::Ready(())
     })
     .await
+}
+
+#[cfg(any(test, feature = "coop"))]
+pub(crate) mod non_async {
+    use crate::coop::Operation;
+    use std::any::Any;
+
+    pub struct Yield {
+        operation: Operation,
+    }
+
+    impl Yield {
+        pub fn operation(&self) -> Operation {
+            self.operation
+        }
+    }
+
+    pub fn trigger(operation: Operation) -> ! {
+        std::panic::panic_any(Yield { operation })
+    }
+
+    pub fn from_panic(payload: &(dyn Any + Send)) -> Option<Operation> {
+        payload.downcast_ref::<Yield>().map(Yield::operation)
+    }
 }
 
 pub mod primary {
