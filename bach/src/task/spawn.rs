@@ -13,7 +13,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 
-pub fn event<F>(events: &Events, future: WithInfo<F>) -> JoinHandle<F::Output>
+pub fn event<F>(events: &Events, future: WithInfo<F>, internal: bool) -> JoinHandle<F::Output>
 where
     F: 'static + Future,
     F::Output: 'static,
@@ -24,7 +24,7 @@ where
         output: handle.state.clone(),
     };
     let future = Box::pin(future);
-    if events.push(Event::Spawn(future)).is_err() {
+    if events.push(Event::Spawn(future, internal)).is_err() {
         handle.state.finish(None);
     }
     handle
@@ -32,6 +32,8 @@ where
 
 pin_project! {
     pub struct TaskFuture<F> where F: Future {
+        // Keep the wrapper in the field so diagnostics and panic messages report `F`
+        // from `TaskFuture<F>::type_name()` instead of `WithInfo<F>`.
         #[pin]
         future: WithInfo<F>,
 

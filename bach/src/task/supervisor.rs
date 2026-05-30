@@ -26,7 +26,7 @@ pub type Events = Q<Event>;
 pub type Runs = Arc<Mutex<queue::vec_deque::Queue<TaskId>>>;
 
 pub enum Event {
-    Spawn(DynRunnable),
+    Spawn(DynRunnable, bool),
     Run(TaskId),
     Abort(TaskId),
 }
@@ -34,7 +34,7 @@ pub enum Event {
 impl fmt::Debug for Event {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Event::Spawn(_) => f.debug_tuple("Spawn").finish(),
+            Event::Spawn(_, _) => f.debug_tuple("Spawn").finish(),
             Event::Run(task_id) => f.debug_tuple("Run").field(task_id).finish(),
             Event::Abort(task_id) => f.debug_tuple("Abort").field(task_id).finish(),
         }
@@ -159,7 +159,7 @@ impl Inner {
         while let Some(mut event) = events.pop_front() {
             loop {
                 match event {
-                    Event::Spawn(mut runnable) => {
+                    Event::Spawn(mut runnable, internal) => {
                         let task_id = self.tasks.insert_with_key(|task_id| {
                             runnable.as_mut().set_id(task_id);
                             let run_queue = self.runs.clone();
@@ -171,6 +171,7 @@ impl Inner {
                                 waker,
                                 runnable,
                                 self_wakes: Default::default(),
+                                internal,
                             }
                         });
                         self.task_counts.fetch_add(1, Ordering::Relaxed);
@@ -240,6 +241,7 @@ struct Slot {
     waker: Waker,
     runnable: DynRunnable,
     self_wakes: SelfWakes,
+    internal: bool,
 }
 
 impl Slot {
@@ -247,7 +249,9 @@ impl Slot {
         self.waker_state.before_poll();
 
         let cx = &mut Context::from_waker(&self.waker);
+        let task_poll_guard = (!self.internal).then(crate::valgrind::TaskPollGuard::new);
         let res = self.runnable.as_mut().poll(cx);
+        drop(task_poll_guard);
 
         // check that the task contract is enforced
         if cfg!(debug_assertions) && res.is_pending() {

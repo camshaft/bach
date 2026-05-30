@@ -4,7 +4,6 @@ use crate::{
         monitor::List as Monitors,
         socket::{self, RecvOptions, RecvResult, SendOptions},
     },
-    ext::*,
     net::{
         monitor::{SocketRead, SocketWrite},
         SocketAddr,
@@ -247,10 +246,9 @@ impl Sender {
         } else {
             let mut channel = self.channel.clone();
             let packet = packet.produce();
-            async move {
+            crate::task::spawn_internal(async move {
                 let _ = channel.push(packet).await;
-            }
-            .spawn();
+            });
         }
 
         Ok(packet.len.unwrap_or(0))

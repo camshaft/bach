@@ -69,23 +69,21 @@ impl Dispatch {
     fn deliver(mut sender: Sender<Packet>, packet: Packet, delay: Duration, monitors: &Monitors) {
         if delay.is_zero() {
             let monitors = monitors.clone();
-            async move {
+            crate::task::spawn_internal(async move {
                 if let Ok(Some(prev)) = sender.push_nowait(packet).await {
                     monitors.on_packet_dropped(&prev, DropReason::ReceiveBufferFull);
                     count!("packet_dropped", 1);
                 }
-            }
-            .spawn();
+            });
         } else {
             let monitors = monitors.clone();
-            async move {
+            crate::task::spawn_internal(async move {
                 crate::time::sleep(delay).await;
                 if let Ok(Some(prev)) = sender.push_nowait(packet).await {
                     monitors.on_packet_dropped(&prev, DropReason::ReceiveBufferFull);
                     count!("packet_dropped", 1);
                 }
-            }
-            .spawn();
+            });
         }
     }
 
