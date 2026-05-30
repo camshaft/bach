@@ -249,8 +249,9 @@ impl Slot {
         self.waker_state.before_poll();
 
         let cx = &mut Context::from_waker(&self.waker);
-        let _task_poll_guard = (!self.internal).then(crate::valgrind::TaskPollGuard::new);
+        let task_poll_guard = (!self.internal).then(crate::valgrind::TaskPollGuard::new);
         let res = self.runnable.as_mut().poll(cx);
+        drop(task_poll_guard);
 
         // check that the task contract is enforced
         if cfg!(debug_assertions) && res.is_pending() {
