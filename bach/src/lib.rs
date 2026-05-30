@@ -21,6 +21,7 @@ pub mod scope;
 pub mod sync;
 pub mod task;
 pub mod time;
+pub(crate) mod valgrind;
 
 pub use task::spawn;
 

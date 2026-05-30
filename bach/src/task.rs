@@ -39,6 +39,14 @@ where
     })
 }
 
+pub(crate) fn spawn_internal<F, T>(future: F) -> JoinHandle<T>
+where
+    F: 'static + Future<Output = T>,
+    T: 'static,
+{
+    scope::borrow_with(|handle| handle.spawn_internal(future))
+}
+
 pub async fn yield_now() {
     let mut pending = true;
     poll_fn(|cx| {

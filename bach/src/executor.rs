@@ -240,7 +240,33 @@ impl Handle {
 
         let future = crate::task::info::WithInfo::new(future, id, &name);
 
-        crate::task::spawn::event(&self.events, future)
+        crate::task::spawn::event(&self.events, future, false)
+    }
+
+    pub(crate) fn spawn_internal<F, Output>(&self, future: F) -> JoinHandle<Output>
+    where
+        F: Future<Output = Output> + 'static,
+        Output: 'static,
+    {
+        self.spawn_internal_named(future, "")
+    }
+
+    pub(crate) fn spawn_internal_named<F, N, Output>(
+        &self,
+        future: F,
+        name: N,
+    ) -> JoinHandle<Output>
+    where
+        F: Future<Output = Output> + 'static,
+        Output: 'static,
+        N: core::fmt::Display,
+    {
+        let id = self.ids.fetch_add(1, Ordering::Relaxed);
+        let name = Arc::from(name.to_string());
+
+        let future = crate::task::info::WithInfo::new(future, id, &name);
+
+        crate::task::spawn::event(&self.events, future, true)
     }
 
     pub fn enter<F: FnOnce() -> O, O>(&self, f: F) -> O {

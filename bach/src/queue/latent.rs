@@ -1,6 +1,5 @@
 use super::{CloseError, PopError, PushError, Pushable};
 use crate::{
-    ext::*,
     time::{Duration, Instant},
     tracing::{debug_span, Instrument},
 };
@@ -83,12 +82,13 @@ where
         }
 
         let waker = cx.waker().clone();
-        async move {
-            crate::time::sleep_until(target).await;
-            waker.wake();
-        }
-        .instrument(debug_span!("message"))
-        .spawn();
+        crate::task::spawn_internal(
+            async move {
+                crate::time::sleep_until(target).await;
+                waker.wake();
+            }
+            .instrument(debug_span!("message")),
+        );
 
         Ok(value)
     }
