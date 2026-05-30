@@ -18,22 +18,6 @@ where
     F: 'static + Future,
     F::Output: 'static,
 {
-    spawn_future(events, future, internal)
-}
-
-pub fn internal_event<F>(events: &Events, future: F) -> JoinHandle<F::Output>
-where
-    F: 'static + Future,
-    F::Output: 'static,
-{
-    spawn_future(events, future, true)
-}
-
-fn spawn_future<G>(events: &Events, future: G, internal: bool) -> JoinHandle<G::Output>
-where
-    G: 'static + Future,
-    G::Output: 'static,
-{
     let handle = JoinHandle::new(events.clone());
     let future = TaskFuture {
         future,
@@ -47,21 +31,23 @@ where
 }
 
 pin_project! {
-    pub struct TaskFuture<G> where G: Future {
+    pub struct TaskFuture<F> where F: Future {
+        // Keep the wrapper in the field so diagnostics and panic messages report `F`
+        // from `TaskFuture<F>::type_name()` instead of `WithInfo<F>`.
         #[pin]
-        future: G,
+        future: WithInfo<F>,
 
-        output: Arc<join::State<G::Output>>,
+        output: Arc<join::State<F::Output>>,
     }
 }
 
-impl<G> Runnable for TaskFuture<G>
+impl<F> Runnable for TaskFuture<F>
 where
-    G: 'static + Future,
-    G::Output: 'static,
+    F: 'static + Future,
+    F::Output: 'static,
 {
     fn type_name(&self) -> &'static str {
-        std::any::type_name::<G>()
+        std::any::type_name::<F>()
     }
 
     fn set_id(self: Pin<&mut Self>, id: TaskId) {

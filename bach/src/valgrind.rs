@@ -18,3 +18,20 @@ pub fn task_poll_end() {
     #[cfg(feature = "valgrind")]
     crabgrind::callgrind::toggle_collect();
 }
+
+pub struct TaskPollGuard(());
+
+impl TaskPollGuard {
+    #[inline(always)]
+    pub fn new() -> Self {
+        task_poll_begin();
+        Self(())
+    }
+}
+
+impl Drop for TaskPollGuard {
+    #[inline(always)]
+    fn drop(&mut self) {
+        task_poll_end();
+    }
+}
