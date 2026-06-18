@@ -127,7 +127,7 @@ struct Inner {
 
 impl Inner {
     fn diagnostics(&mut self) -> Vec<TaskDiagnostics> {
-        let mut diagnostics = Vec::new();
+        let mut diagnostics = Vec::with_capacity(self.tasks.len());
 
         for (_task_id, task) in self.tasks.iter_mut() {
             diagnostics.push(task.diagnostic());
