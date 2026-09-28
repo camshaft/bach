@@ -62,7 +62,14 @@ pub fn sim<F: FnOnce()>(f: F) {
             Violation::Leaked { alloc } => {
                 if bt_matches(alloc, |bt| {
                     bt.contains("bolero_generator::any::default::with")
-                        || bt.contains("bach::group::Groups::name_to_id")
+                        // The group name/id intern maps live in a thread-local `Groups` for the
+                        // life of the thread (freed at thread exit), so their interned name
+                        // Strings are still allocated at end-of-sim — an intentional cache, not a
+                        // leak. Match on the type path only (not `...::name_to_id`): rustc renders
+                        // the frame as `<bach::group::Groups>::name_to_id` on newer toolchains, so
+                        // the angle brackets break a `Groups::name_to_id` substring — `bach::group::Groups`
+                        // matches both the old `Type::method` and new `<Type>::method` renderings.
+                        || bt.contains("bach::group::Groups")
                 }) {
                     return false;
                 }
