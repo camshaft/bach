@@ -32,4 +32,4 @@ jobs:
 
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
-          command: check --config .github/config/cargo-deny.toml
+          command: check
