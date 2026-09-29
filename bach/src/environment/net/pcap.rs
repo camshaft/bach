@@ -25,7 +25,8 @@ pub trait AsPcap {
     }
 
     fn as_pcap_bytes(&self) -> Vec<u8> {
-        let mut buf = Vec::new();
+        let len = self.pcap_len().unwrap_or(0);
+        let mut buf = Vec::with_capacity(len);
         self.as_pcap(&mut buf).unwrap();
         buf
     }

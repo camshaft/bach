@@ -8,7 +8,7 @@ pub struct Bitset([Slot; SLOT_COUNT]);
 
 impl Bitset {
     pub fn is_empty(&self) -> bool {
-        self.0.iter().copied().fold(0, |acc, slot| acc | slot) == 0
+        self.0.iter().all(|&slot| slot == 0)
     }
 
     pub fn len(&self) -> u8 {
