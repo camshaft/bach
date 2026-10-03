@@ -3,7 +3,7 @@
 **Bach** is a Rust-based framework for simulating and testing complex async/await-based systems in a non-real-time environment. It's capable of modeling network protocols, queueing systems, and concurrent task interactions with testing and visualization tools.
 
 ## Key Features
-- **Discrete Event Simulation**: Schedules events in simulated time for deterministic testing. See [Determinism and Replay](bach/DETERMINISM.md) for the reproducibility contract and how to diagnose a seed that fails to replay.
+- **Discrete Event Simulation**: Schedules events in simulated time for deterministic testing. See [Determinism and Replay](docs/determinism.md) for the reproducibility contract and how to diagnose a seed that fails to replay.
 - **Async/Await Integration**: Supports any async that doesn't require a specific runtime, like `tokio` or `async-std`.
 - **Composable Queues**: Build flexible queues with latency, packet loss, mutexes, and sojourn tracking.
 - **Network Simulation**: Simulates UDP sockets with configurable latency, loss, reordering, and duplication; TCP support planned for the near future.
