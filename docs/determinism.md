@@ -93,6 +93,22 @@ flag list yourself and pass it as one source: for example, under Amazon's brazil
 set `CARGO_ENCODED_RUSTFLAGS` to brazil's configured flags plus your added
 `--cfg`, rather than a bare `RUSTFLAGS` that clobbers them.
 
+A stronger corollary for an *old* recorded failure: the source revision alone
+does not pin the build. Reproducing the exact simulation requires the whole
+dependency closure to resolve identically, and that closure drifts over time — a
+dependency can be removed from, or re-resolved within, the package set, so even
+checking out the recorded revision (or pinning its historical version set) can
+build a *different* simulation, or fail to build at all. A rebuild whose
+dependency closure may differ cannot settle the determinism question either way:
+a non-reproduction (all green) is inconclusive, since it may only mean the
+closure changed, and a reproduction shows only that the bug is reachable in
+*that* build, not that the original recording replayed. The reliable way to
+replay an old recorded failure is to run the **archived original binary** for
+that version rather than rebuild it; keeping the original built binaries per
+version — the actual artifacts that recorded the seeds, not a later rebuild of
+the same version — is what keeps old seeds replayable, with the source revision
+only a pointer back to the code.
+
 ## Leaks: what Bach cannot control
 
 Determinism holds only for entropy and ordering that flow through the three
