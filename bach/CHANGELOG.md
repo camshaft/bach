@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html)
 (for `0.x` releases, a breaking change bumps the minor version).
 
+## [0.2.1](https://github.com/camshaft/bach/compare/bach-v0.2.0...bach-v0.2.1) - 2026-10-03
+
+### Other
+
+- move determinism guide into docs/, correct seed-scope mechanics ([#135](https://github.com/camshaft/bach/pull/135))
+- add canonical Determinism and Replay guide ([#133](https://github.com/camshaft/bach/pull/133))
+
 ## [0.2.0](https://github.com/camshaft/bach/compare/bach-v0.1.3...bach-v0.2.0)
 
 This is a **breaking** release. It supersedes `0.1.3`, which was published as a patch
