@@ -145,23 +145,50 @@ order-insensitive cases) is an effective preventive net against class 1.
 ## Diagnosing a seed that will not reproduce
 
 If a recorded seed does not reproduce even on matching source, do **not** label
-the test flaky. Use this check, which needs no exact source revision:
+the test flaky. First confirm a seed is actually installed — the default
+`bach::sim()` is unseeded (see above), and an unseeded run has no deterministic
+RNG stream to reproduce in the first place, which is not a leak. Then, because
+`RandomState` is seeded once **per process**, the check is to run the same seed
+in many **fresh processes** on the same source — for
+example, a shell loop invoking the test binary ~20 times with
+`BOLERO_RANDOM_SEED` set — and compare what each run did. Bach guarantees that
+same seed + same source + same process is identical, so any variation across
+fresh processes is a per-process entropy leak.
 
-Because `RandomState` is seeded once **per process**, run the same seed in many
-**fresh processes** on the same source — for example, a shell loop invoking the
-test binary ~20 times with `BOLERO_RANDOM_SEED` set — and compare outcomes.
-Bach guarantees that same seed + same source + same process is identical, so:
+What you compare matters. **Pass/fail is a weak signal: it catches only a leak
+that changes the outcome.** A nondeterminism that does not flip the result — or
+one that a fix has made the code tolerate — passes every run while the leak is
+still present. Do not conclude "deterministic" from a run of green passes; that
+is how a surviving leak gets mistaken for a fixed bug.
 
-- If the pass/fail result, or the sequence of applied operations, **flips across
-  fresh processes**, a per-process entropy leak is confirmed (a `RandomState`
-  HashMap-order leak is the first suspect). That is a sim-determinism bug to
-  root-cause and fix, per the leak taxonomy above — not flakiness.
-- If it is **stable across processes** but still differs from the recorded
-  failure, the recorded input came from a different source or
-  bolero/generator-crate version. That is a source mismatch; resolve the source
-  revision rather than hunting a leak.
+The signal that actually distinguishes the cases is a **canonical trace or state
+digest**: capture something that reflects the run's internal ordering — the
+sequence of applied operations, a schedule/event digest, or the final state of
+each simulated component — canonicalize it (strip wall-clock, pointer, and
+address noise), hash it, and diff the hashes across the fresh processes. An
+ordering digest (the applied-op sequence or schedule/event order) is the
+strongest; a final-state-only digest is weaker, because a transient-ordering
+leak that re-converges to the same final state will not show up in it.
 
-This cleanly tells you which case you are in before you spend effort on either.
+- If the **digests differ** across fresh processes, a per-process entropy leak
+  is confirmed (a `RandomState` HashMap-order leak is the first suspect) — a
+  sim-determinism bug to root-cause and fix per the leak taxonomy above, not
+  flakiness, even if every run passed.
+- If the digests are **identical** but still differ from the recorded failure,
+  the recorded input came from a different source or bolero/generator-crate
+  version. That is a source mismatch; resolve the source revision rather than
+  hunting a leak.
+
+Bach exposes no built-in run digest, so the trace is something you capture from
+the system-under-test — hash the quantity whose nondeterminism would matter, not
+an arbitrary log. If instrumenting a trace is impractical, the HashMap-order
+leak class can instead be closed **by construction**: replace `std`'s
+`RandomState` with a fixed-seed `BuildHasher` (or ban order-observable `std` hash
+collections, as above), which removes the per-process entropy source so the leak
+cannot occur, with no detection required. Note this makes iteration order
+*process-stable* (identical across runs for the same inserts), not sorted or
+insertion-independent — it closes the per-process-entropy leak, but not a case
+where the insertion order itself comes from another nondeterministic source.
 
 ## Turning a recorded seed into a regression test
 
