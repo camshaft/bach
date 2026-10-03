@@ -16,42 +16,61 @@ simulation it almost never is.
 
 ## What Bach controls
 
-Determinism rests on three sources, all keyed off a single `u64` seed:
+Determinism rests on three sources. The scheduler and clock are deterministic
+unconditionally; the third, the RNG, becomes deterministic once you install a
+seed:
 
-1. **Scheduler / executor** (`bach/src/executor.rs`, `bach/src/runtime.rs`).
-   Tasks are polled in a deterministic order driven by the simulated event
-   queue, never by OS threads. There is no real parallelism, so there is no
-   thread-scheduling nondeterminism.
+1. **Scheduler / executor** (`bach/src/executor.rs`, `bach/src/task/supervisor.rs`).
+   Tasks are polled in a deterministic order driven by the simulated run and
+   event queues (`VecDeque`, `pop_front`), never by OS threads. There is no real
+   parallelism, so there is no thread-scheduling nondeterminism. This holds
+   whether or not a seed is set.
 
 2. **Simulated clock** (`bach/src/time.rs`). Time advances in discrete
    simulated steps. Any sleep, timeout, or `Instant`-equivalent resolves
    through Bach's clock rather than wall-clock time, so timing is identical on
-   every run regardless of how fast or loaded the host is.
+   every run regardless of how fast or loaded the host is. This also holds
+   whether or not a seed is set.
 
-3. **Seeded RNG scope** (`bach/src/rand.rs`). When you seed the runtime, the
-   seed builds a `Xoshiro256PlusPlus` (`seed_from_u64`) wrapped as a bolero
-   generator driver and installed as a per-task scope that is entered on every
-   poll. Every `bolero_generator` draw (`produce()`, `any()`, and the rest of
-   the re-exported `bach::rand` prelude) inside a task pulls from that
-   deterministic stream.
+3. **Seeded RNG** (`bach/src/rand.rs`). bach draws its randomness from a seeded
+   `Xoshiro256PlusPlus` (`seed_from_u64`) wrapped as a bolero generator driver,
+   from which `bolero_generator` draws (`produce()`, `any()`, and the rest of
+   the re-exported `bach::rand` prelude) pull. There are two ways to install the
+   seed, at different granularity:
+   - **Runtime-wide** (`Runtime::with_seed`, `bach/src/environment/default.rs`):
+     a single scope stored on the environment and entered once around each
+     macrostep's poll loop, so every task draws from one shared, deterministic
+     stream in poll order.
+   - **Per-future** (`future.with_seed(seed)` via `SeedExt`, `bach/src/ext.rs`):
+     wraps one future in its own scope that is entered on every poll of that
+     future, giving it an independent deterministic stream.
+   Either way the stream is a pure function of the seed.
 
-Because all three are driven by the one seed, a seeded Bach run is a pure
-function of `(seed, source)`.
+With a seed installed, a Bach run is a pure function of `(seed, source)`; the
+scheduler and clock are already deterministic without one.
 
 ## Seeding and replaying
 
-Seed the runtime explicitly:
+RNG determinism is not automatic. `bach::sim(..)` builds the default runtime,
+which is **unseeded** (`rand: None`): no RNG scope is installed, so `any()` /
+`produce()` draws are not pinned by any Bach seed. The deterministic scheduler
+and simulated clock still apply, but to make the random draws reproducible you
+must install a seed, either runtime-wide:
 
 ```rust
 let mut rt = bach::environment::default::Runtime::new().with_seed(seed);
 rt.run(|| { /* simulation */ });
 ```
 
-Under bolero, a recorded `BOLERO_RANDOM_SEED` deterministically regenerates the
-**exact failing input as bolero's first input (iteration 0)**;
-`BOLERO_RANDOM_ITERATIONS` is the count of distinct random seeds tried, not
-inputs-per-seed, so it is harmless but is not what pins the replay — the seed
-itself is. Setting the recorded seed on matching source is sufficient to replay.
+or per-future with `future.with_seed(seed)`.
+
+Under bolero, the harness supplies the seed. Per bolero's own semantics (see the
+[bolero][bolero] crate — these are bolero's behavior, not defined in bach), a
+recorded `BOLERO_RANDOM_SEED` regenerates the exact failing input as bolero's
+first input, and `BOLERO_RANDOM_ITERATIONS` counts the distinct random seeds
+tried rather than inputs per seed — so the seed itself, not `ITERATIONS=1`, is
+what pins the replay. Setting the recorded seed on matching source is sufficient
+to replay.
 
 The replay contract is: **same seed + same source** (the same code *and* the
 same bolero / generator-crate versions). A different source changes the
@@ -62,10 +81,14 @@ source mismatch, not a determinism bug.
 
 Determinism holds only for entropy and ordering that flow through the three
 controlled sources above. Bach cannot intercept nondeterminism in the
-system-under-test that bypasses them. Bach's own source deliberately references
-no `RandomState`, `thread_rng`, `getrandom`, or `SystemTime` — it supplies the
-deterministic primitives, so a leak lives in the code being simulated, not in
-Bach. In priority order:
+system-under-test that bypasses them. Bach's own source references no
+`thread_rng`, `getrandom`, or `SystemTime`, and no wall-clock `Instant::now` — it
+supplies the deterministic primitives — so in practice a leak almost always
+lives in the code being simulated rather than in Bach. (Bach does use a few
+`std` `HashMap`/`HashSet` instances internally, for example in `group.rs`, but
+never in a way that exposes hash iteration order to a simulation decision — the
+only such iteration, `group::list()`, feeds diagnostic snapshots.) In priority
+order:
 
 1. **`std` HashMap / HashSet iteration order — the number-one culprit.**
    `std::collections::HashMap` and `HashSet` default to `RandomState`, which is
