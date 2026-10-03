@@ -72,10 +72,26 @@ tried rather than inputs per seed — so the seed itself, not `ITERATIONS=1`, is
 what pins the replay. Setting the recorded seed on matching source is sufficient
 to replay.
 
-The replay contract is: **same seed + same source** (the same code *and* the
-same bolero / generator-crate versions). A different source changes the
-simulation, so a seed stops reproducing against mismatched source. That is a
-source mismatch, not a determinism bug.
+The replay contract is: **same seed + same source**, where "source" means the
+same code, the same bolero / generator-crate versions, *and the same build
+configuration* — the `cfg` flags and features the seed was recorded under. Build
+configuration matters because `cfg`/feature gates can change which code paths
+execute, and therefore which draws are taken from the seeded stream and in what
+order; a change that alters the executed paths yields a different generated
+input, so the seed stops reproducing. (A `cfg` difference that touches no
+executed path is harmless.) That is a source mismatch, not a determinism bug.
+
+One easy-to-miss pitfall when reproducing inside a managed build system: Cargo
+does not merge `rustflags` — it uses a single highest-priority source
+(`CARGO_ENCODED_RUSTFLAGS`, then `RUSTFLAGS`, then `target.*.rustflags`, then
+`[build] rustflags`) and ignores the rest. So a bare `RUSTFLAGS` env var wholly
+*replaces* a build wrapper's configured `[build] rustflags` rather than adding to
+them, silently dropping flags the build needs or changing the `cfg` the seed was
+recorded under — the test then fails to compile or runs under a different
+configuration. Because the sources do not combine automatically, build the full
+flag list yourself and pass it as one source: for example, under Amazon's brazil,
+set `CARGO_ENCODED_RUSTFLAGS` to brazil's configured flags plus your added
+`--cfg`, rather than a bare `RUSTFLAGS` that clobbers them.
 
 ## Leaks: what Bach cannot control
 
